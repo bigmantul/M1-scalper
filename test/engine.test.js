@@ -387,3 +387,13 @@ test("candle simulator: unambiguous bars are not flagged", () => {
   assert.equal(r.trades[0].ambiguous, undefined);
   assert.equal(r.trades[0].exitReason, "initial_stop");
 });
+
+test("onOpenSkipped clears the pending order and counts the block", () => {
+  const h = harness({}, { autoConfirm: false });
+  h.step(K(0), 100); h.step(K(0) + 59, 101); h.step(K(1), 101);
+  h.engine.onOpenSkipped("too tight", "stopTooTight");
+  assert.equal(h.engine.s.pending, null);
+  assert.equal(h.engine.s.blocked.stopTooTight, 1);
+  assert.equal(h.engine.s.execFailures, 0);
+  assert.equal(h.engine.status, STATUS.WAITING_FOR_NEXT_CANDLE);
+});

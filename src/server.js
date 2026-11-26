@@ -85,7 +85,10 @@ export function createApp({ bot, password }) {
     try {
       const merged = validateSettings(deepMerge(bot.settings, req.body?.settings || {}));
       const lt = bot.lastTick && bot.settings.symbol === merged.symbol ? (bot.lastTick.bid + bot.lastTick.ask) / 2 : Number(req.body?.price) || null;
-      res.json(riskPreview(merged, { symbol: merged.symbol, refPrice: lt, balance: bot.balance || 0 }));
+      const out = riskPreview(merged, { symbol: merged.symbol, refPrice: lt, balance: bot.balance || 0 });
+      const tt = bot.settings.symbol === merged.symbol ? bot.typicalTick() : null;
+      if (tt && out?.slPoints) { out.typicalTick = tt; out.stopInTicks = out.slPoints / tt; out.minStopTicks = merged.risk.minStopTicks; }
+      res.json(out);
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 

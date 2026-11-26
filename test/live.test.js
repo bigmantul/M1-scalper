@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { startFakeDeriv } from "./fake-deriv.js";
 import { Store } from "../src/live/store.js";
-import { Bot } from "../src/live/bot.js";
+import { Bot, parseMultiplierRanges } from "../src/live/bot.js";
+import { setLadder, symbolMeta } from "../config/symbols.js";
 import { createApp } from "../src/server.js";
 import { validateSettings } from "../src/core/settings.js";
 
@@ -280,4 +281,61 @@ test("health and ping endpoints answer without a login and leak nothing sensitiv
     assert.equal(await (await fetch(base + "/ping")).text(), "pong");
     assert.equal((await fetch(base + "/api/state")).status, 401, "everything else still needs the password");
   } finally { srv.close(); await teardown(); }
+});
+
+test("rejected order: the exact request sent to Deriv is logged", async () => {
+  const { fake, bot, teardown } = await setup();
+  try {
+    bot.start(); await until(() => bot.connected);
+    fake.failNextBuy = "stake";
+    await bullishSignal(fake);
+    await until(() => bot.engine.s.execFailures === 1);
+    const ev = bot.store.events.find(e => /Deriv rejected the order/.test(e.message));
+    assert.ok(ev, "rejection logged");
+    assert.match(ev.message, /request:/);
+    assert.match(ev.message, /"amount":10/);
+  } finally { await teardown(); }
+});
+
+test("a multiplier typed by the user that Deriv does not offer is rejected, not silently changed", async () => {
+  const { fake, bot, teardown } = await setup({ settings: { multiplier: 7, pipSizes: { R_100: 0.1 } } });
+  try {
+    bot.start(); await until(() => bot.connected);
+    fake.failNextBuy = "multiplier";
+    await bullishSignal(fake);
+    await until(() => bot.engine.s.execFailures === 1);
+    assert.equal(fake.proposals.length, 1, "no retry");
+    assert.equal(fake.buys.length, 0);
+    assert.ok(bot.store.events.some(e => /allowed: 10, 20, 30/.test(e.message)));
+  } finally { setLadder("R_100", symbolMeta("R_100").ladder); await teardown(); }
+});
+
+test("multiplier list is fetched from Deriv at connect time", async () => {
+  const before = [...symbolMeta("R_100").ladder];
+  const { fake, bot, teardown } = await setup({ settings: { pipSizes: { R_100: 0.1 } } });
+  try {
+    fake.ladder = [40, 80];
+    bot.start(); await until(() => bot.connected);
+    assert.deepEqual(symbolMeta("R_100").ladder, [40, 80]);
+    await bullishSignal(fake);
+    await until(() => fake.proposals.length >= 1);
+    assert.equal(fake.proposals[0].multiplier, 40, "auto picks the smallest live rung");
+  } finally { setLadder("R_100", before); await teardown(); }
+});
+
+test("parseMultiplierRanges reads multiplier contracts only", () => {
+  assert.deepEqual(parseMultiplierRanges({ contracts_for: { available: [{ contract_category: "multiplier", multiplier_range: [20, 10] }, { contract_category: "callput", multiplier_range: [99] }] } }), [10, 20]);
+  assert.deepEqual(parseMultiplierRanges({}), []);
+});
+
+test("stop far smaller than normal tick noise: entry skipped, nothing sent, not counted as a failure", async () => {
+  const { fake, bot, teardown } = await setup({ settings: { pipSizes: { R_100: 0.01 } } });
+  try {
+    bot.start(); await until(() => bot.connected);
+    for (let i = 0; i < 40; i++) fake.pushTick(K(0) + i, i % 2 ? 105 : 100);
+    fake.pushTick(K(0) + 59, 101); fake.pushTick(K(1), 101);
+    await until(() => bot.engine.s.blocked.stopTooTight === 1, 4000, "entry skipped");
+    assert.equal(fake.proposals.length, 0);
+    assert.equal(bot.engine.s.execFailures, 0);
+  } finally { await teardown(); }
 });

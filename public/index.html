@@ -154,6 +154,7 @@
             <div><label class="chk"><input type="checkbox" id="dlOn">Daily loss limit ($)</label><input id="dl" type="number" step="any" min="0"></div>
             <div><label class="chk"><input type="checkbox" id="clOn">Max consecutive losses</label><input id="cl" type="number" step="1" min="1"></div>
             <div><label class="chk"><input type="checkbox" id="spOn">Max spread (price points)</label><input id="sp" type="number" step="any" min="0"></div>
+            <div><label class="chk"><input type="checkbox" id="stOn">Min stop size (× a typical tick move)</label><input id="st" type="number" step="any" min="0"></div>
           </div>
         </fieldset>
 
@@ -321,6 +322,7 @@ function fillForm() {
   $("dlOn").checked = s.risk.dailyLossEnabled; f("dl", s.risk.dailyLossUsd);
   $("clOn").checked = s.risk.consecLossEnabled; f("cl", s.risk.consecLossMax);
   $("spOn").checked = s.risk.spreadFilterEnabled; f("sp", s.risk.maxSpreadPoints);
+  $("stOn").checked = s.risk.stopSanityEnabled; f("st", s.risk.minStopTicks);
   symHint(); formDirty = false; schedulePreview();
 }
 
@@ -337,7 +339,7 @@ function readForm() {
     symbol: sym, mode: $("mode").value, slPips: n("slPips"), trailPips: n("trailPips"), trailActivation: $("trailActivation").value,
     pipSizes: { [sym]: n("pip") }, multiplier: (m === "" || m === "auto") ? "auto" : Number(m),
     sizing: { mode: $("sizeMode").value, stake: n("stake"), riskPct: n("riskPct"), maxStake: n("maxStake") },
-    risk: { dailyLossEnabled: $("dlOn").checked, dailyLossUsd: n("dl"), consecLossEnabled: $("clOn").checked, consecLossMax: n("cl"), spreadFilterEnabled: $("spOn").checked, maxSpreadPoints: n("sp") },
+    risk: { dailyLossEnabled: $("dlOn").checked, dailyLossUsd: n("dl"), consecLossEnabled: $("clOn").checked, consecLossMax: n("cl"), spreadFilterEnabled: $("spOn").checked, maxSpreadPoints: n("sp"), stopSanityEnabled: $("stOn").checked, minStopTicks: n("st") },
   };
 }
 
@@ -354,8 +356,12 @@ function schedulePreview() {
         `stop <b>${px(p.slPoints)}</b> pts${p.slPctOfPrice != null ? ` (${p.slPctOfPrice.toFixed(3)}% of price)` : ""}`,
         `trail <b>${px(p.trailPoints)}</b> pts${p.trailPctOfPrice != null ? ` (${p.trailPctOfPrice.toFixed(3)}%)` : ""}`];
       let tail = "";
-      if (p.stake != null) tail = `<br>At stake <b>$${p.stake}</b> × ${p.multiplier}: the initial stop loses about <b>${money(p.riskUsd, 4)}</b>` + (p.nativeStopUsd ? `, sent to Deriv as a $${p.nativeStopUsd} server-side stop.` : `. <span class="neg">That is below Deriv's minimum stop, so no server-side stop would be placed — only the bot's own stop protects the trade.</span>`);
-      else if (p.error == null && p.multiplier) tail = `<br>Multiplier ${p.multiplier}. Price not available yet to size the stop in dollars.`;
+      if (p.stopInTicks != null) {
+        const k = p.stopInTicks, bad = k < p.minStopTicks, weak = k < 3;
+        tail += `<br>Stop = <b>${k.toFixed(1)}×</b> a typical tick move (${px(p.typicalTick)})` + (bad ? `. <span class="neg">Too small — the bot will skip entries until you widen it.</span>` : weak ? `. <span class="neg">Small — random jitter may hit it.</span>` : ` ✓`);
+      }
+      if (p.stake != null) tail += `<br>At stake <b>$${p.stake}</b> × ${p.multiplier}: the initial stop loses about <b>${money(p.riskUsd, 4)}</b>` + (p.nativeStopUsd ? `, sent to Deriv as a $${p.nativeStopUsd} server-side stop.` : `. <span class="neg">That is below Deriv's minimum stop, so no server-side stop would be placed — only the bot's own stop protects the trade.</span>`);
+      else if (p.error == null && p.multiplier) tail += `<br>Multiplier ${p.multiplier}. Price not available yet to size the stop in dollars.`;
       $("preview").innerHTML = parts.join(" · ") + tail;
     } catch (e) { $("preview").textContent = e.message; }
   }, 250);

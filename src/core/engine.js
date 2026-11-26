@@ -278,6 +278,16 @@ export class ScalperEngine {
     return s.position;
   }
 
+  /** The runner decided NOT to send this entry (e.g. stop far too tight). Not an execution failure. */
+  onOpenSkipped(reason, key = "skipped") {
+    const s = this.s;
+    if (!s.pending || s.pending.type !== "OPEN") return;
+    s.pending = null;
+    s.status = STATUS.WAITING_FOR_NEXT_CANDLE;
+    s.blocked[key] = (s.blocked[key] || 0) + 1;
+    this.log("warn", `Entry skipped: ${reason}`);
+  }
+
   onOpenRejected(reason) {
     const s = this.s;
     if (!s.pending || s.pending.type !== "OPEN") return;
@@ -359,7 +369,7 @@ export class ScalperEngine {
       s.needsReconcile = false;
       if (s.status === STATUS.ERROR_OR_RECOVERY) s.status = s.position ? STATUS.POSITION_ACTIVE : STATUS.WAITING_FOR_NEXT_CANDLE;
     }
-    this.log("info", `Reconciled with broker: ${result}`);
+    this.log(result === "ok" ? "debug" : "info", `Reconciled with broker: ${result}`);
     return result;
   }
 

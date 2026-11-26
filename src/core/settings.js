@@ -32,6 +32,7 @@ export const DEFAULT_SETTINGS = {
     dailyLossEnabled: true,   dailyLossUsd: 10,
     consecLossEnabled: true,  consecLossMax: 10,
     spreadFilterEnabled: false, maxSpreadPoints: 0,
+    stopSanityEnabled: true,   minStopTicks: 1,   // block entries when the stop is smaller than N typical ticks of movement
     maxExecFailures: 3,        // consecutive order failures before the bot disables itself
     minNativeStopUsd: 0.01,    // smallest server-side stop Deriv will accept
   },
@@ -83,6 +84,7 @@ export function validateSettings(candidate) {
   bool(s.risk.dailyLossEnabled, "risk.dailyLossEnabled");  num(s.risk.dailyLossUsd, "risk.dailyLossUsd", { min: 0 });
   bool(s.risk.consecLossEnabled, "risk.consecLossEnabled"); num(s.risk.consecLossMax, "risk.consecLossMax", { min: 1 });
   bool(s.risk.spreadFilterEnabled, "risk.spreadFilterEnabled"); num(s.risk.maxSpreadPoints, "risk.maxSpreadPoints", { min: 0 });
+  bool(s.risk.stopSanityEnabled, "risk.stopSanityEnabled"); num(s.risk.minStopTicks, "risk.minStopTicks", { min: 0 });
   num(s.risk.maxExecFailures, "risk.maxExecFailures", { min: 1 });
   num(s.risk.minNativeStopUsd, "risk.minNativeStopUsd", { min: 0 });
   num(s.costs.spreadPoints, "costs.spreadPoints", { min: 0 });

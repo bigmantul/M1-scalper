@@ -82,6 +82,13 @@ export const SYMBOL_META = Object.fromEntries(
 
 export const SYMBOLS = Object.keys(SYMBOL_META);
 
+/** Replace a symbol's multiplier options with the list Deriv itself reported (used at runtime). */
+export function setLadder(symbol, ladder) {
+  const clean = [...new Set((ladder || []).map(Number).filter(n => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
+  if (SYMBOL_META[symbol] && clean.length) SYMBOL_META[symbol].ladder = clean;
+  return clean;
+}
+
 export function symbolMeta(symbol) {
   const m = SYMBOL_META[symbol];
   if (!m) throw new Error(`Unknown symbol "${symbol}"`);

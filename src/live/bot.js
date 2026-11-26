@@ -20,7 +20,7 @@ import { DerivClient, getWebSocketUrl } from "./deriv.js";
 import { ScalperEngine, STATUS } from "../core/engine.js";
 import { validateSettings, deepMerge, pipSizeFor } from "../core/settings.js";
 import { nativeStopUsd, pnlFor } from "../core/sizing.js";
-import { symbolMeta, SYMBOL_META } from "../../config/symbols.js";
+import { symbolMeta, SYMBOL_META, setLadder } from "../../config/symbols.js";
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const TYPE_TO_SIDE = { MULTUP: "BUY", MULTDOWN: "SELL" };
@@ -29,6 +29,17 @@ const isTransient = (e) => /timeout|closed|not open|ECONN|socket/i.test(e?.messa
 function parseAllowedMultipliers(text) {
   const m = String(text).match(/(?:Accepts|Allowed)[:\s\[]*[\d,\s\[\]\.]+/i);
   return m ? [...m[0].matchAll(/\d+/g)].map(x => parseInt(x[0], 10)).sort((a, b) => a - b) : [];
+}
+
+/** Reads the multiplier values Deriv offers from a contracts_for reply. */
+export function parseMultiplierRanges(resp) {
+  const list = resp?.contracts_for?.available || [];
+  const out = new Set();
+  for (const c of list) {
+    if (!(c.contract_category === "multiplier" || /^MULT(UP|DOWN)$/.test(c.contract_type || ""))) continue;
+    for (const v of c.multiplier_range || []) { const n = Number(v); if (Number.isFinite(n) && n > 0) out.add(n); }
+  }
+  return [...out].sort((a, b) => a - b);
 }
 
 export class Bot extends EventEmitter {
@@ -43,6 +54,7 @@ export class Bot extends EventEmitter {
     this.client = null; this.connected = false; this.running = false;
     this.accountId = null; this.balance = null; this.currency = "USD";
     this.lastTick = null; this.livePnl = null;
+    this.tickMoves = []; this._prevMid = null;     // recent absolute tick-to-tick moves (for the stop sanity check)
     this.mult = new Map();                        // symbol -> multiplier learned from Deriv's errors
     this.waiters = new Map();                     // contractId -> [fn(contract)]
     this.closing = new Set();                     // contractIds being closed by us right now
@@ -149,7 +161,9 @@ export class Bot extends EventEmitter {
     this._onBalance(bal.balance);
     this.engine.s.needsReconcile = true;          // no entries until the broker's positions have been checked
     await this._subscribeTicks(s.symbol);
-    await this._reconcile("startup");
+    await this._loadLadder(s.symbol);
+    const startRes = await this._reconcile("startup");
+    this.log("info", `Broker state checked: ${startRes}`);
     this.connected = true;
     this._startPeriodic(client);
     return closed;
@@ -162,6 +176,23 @@ export class Bot extends EventEmitter {
       this._reconcile("periodic").catch(e => this.log("warn", `Periodic reconcile failed: ${e.message}`));
     }, 30000);
     client.once("close", () => clearInterval(timer));
+  }
+
+  /** Asks Deriv which multipliers this symbol really offers (built-in lists can be out of date). */
+  async _loadLadder(symbol) {
+    try {
+      const r = await this.client.send({ contracts_for: symbol, currency: this.currency });
+      const ladder = parseMultiplierRanges(r);
+      if (ladder.length) { setLadder(symbol, ladder); this.log("info", `Deriv offers multipliers ${ladder.join("/")} on ${symbol}`); }
+      else this.log("warn", `Deriv did not list multipliers for ${symbol}; using the built-in list`);
+    } catch (e) { this.log("warn", `Could not fetch multipliers for ${symbol}: ${e.message}`); }
+  }
+
+  /** Mean absolute tick-to-tick move over the last ≤300 ticks (null until 30 ticks seen). */
+  typicalTick() {
+    const m = this.tickMoves;
+    if (m.length < 30) return null;
+    return m.reduce((a, b) => a + b, 0) / m.length;
   }
 
   async _subscribeTicks(symbol) {
@@ -183,6 +214,9 @@ export class Bot extends EventEmitter {
     const tick = { epoch: Number(t.epoch), bid: Number(t.bid ?? t.quote), ask: Number(t.ask ?? t.quote) };
     if (![tick.epoch, tick.bid, tick.ask].every(Number.isFinite)) return;
     this.lastTick = { ...tick, quote };
+    const mid = (tick.bid + tick.ask) / 2;
+    if (this._prevMid != null && mid !== this._prevMid) { this.tickMoves.push(Math.abs(mid - this._prevMid)); if (this.tickMoves.length > 300) this.tickMoves.shift(); }
+    this._prevMid = mid;
     const cmds = this.engine.onTick(tick);
     if (cmds.length) this._execute(cmds, tick);
     this._persist(false);
@@ -232,20 +266,40 @@ export class Bot extends EventEmitter {
         : `the stop is only $${usd.toFixed(4)}, below Deriv's $${this.settings.risk.minNativeStopUsd} minimum`;
       this.log("warn", `No server-side stop placed: ${why}. Only the bot's own stop protects this trade`);
     }
-    const prop = await this.client.send(payload);
-    const buy = await this.client.send({ buy: prop.proposal.id, price: Number(prop.proposal.ask_price) });
+    let prop;
+    try { prop = await this.client.send(payload); }
+    catch (e) { e.request = payload; throw e; }
+    const buyReq = { buy: prop.proposal.id, price: Number(prop.proposal.ask_price) };
+    let buy;
+    try { buy = await this.client.send(buyReq); }
+    catch (e) { e.request = { proposal: payload, buy: buyReq }; throw e; }
     return { buy: buy.buy, nativeStop, multiplier };
   }
 
   async _open(cmd) {
     if (!this.engine.s.pending || this.engine.s.pending.type !== "OPEN") return;
-    let multiplier = this.mult.get(cmd.symbol) ?? cmd.multiplier;
+    const auto = this.settings.multiplier === "auto";
+    let multiplier = auto ? (this.mult.get(cmd.symbol) ?? cmd.multiplier) : cmd.multiplier;
+
+    // stop sanity: a stop smaller than normal tick noise is hit by random jitter, not by a real move
+    const r = this.settings.risk, snap = this.engine.s.pending?.snapshot, tt = this.typicalTick();
+    if (r.stopSanityEnabled && tt && snap) {
+      const ticks = snap.slDist / tt;
+      if (ticks < r.minStopTicks) {
+        this.engine.onOpenSkipped(`the ${snap.slDist} stop is only ${ticks.toFixed(2)}x a typical tick move (${tt.toPrecision(3)}); raise the pip size or stop pips`, "stopTooTight");
+        return;
+      }
+      if (ticks < 3) this.log("warn", `Stop is only ${ticks.toFixed(1)}x a typical tick move (${tt.toPrecision(3)}) — likely to be hit by noise`);
+    }
+
     let res;
     try {
       try { res = await this._buy(cmd, multiplier); }
       catch (e) {
         const allowed = /multiplier|Accepts|Allowed|acceptable range/i.test(e.message) ? parseAllowedMultipliers(e.message) : [];
+        if (allowed.length) setLadder(cmd.symbol, allowed);            // learn the real list
         if (!allowed.length || isTransient(e)) throw e;
+        if (!auto) throw Object.assign(new Error(`x${multiplier} is not offered on ${cmd.symbol} (allowed: ${allowed.join(", ")}). Pick one of those or set the multiplier to auto`), { request: e.request, reply: e.message });
         multiplier = allowed[0]; this.mult.set(cmd.symbol, multiplier);
         this.log("info", `Deriv only accepts ${allowed.join("/")} for ${cmd.symbol} — retrying once with x${multiplier}`);
         res = await this._buy(cmd, multiplier);
@@ -257,6 +311,8 @@ export class Bot extends EventEmitter {
         this.engine.onConnectionLost();
         await this._reconcile("order-uncertain").catch(() => {});
       } else {
+        let req = ""; try { req = e.request ? ` | request: ${JSON.stringify(e.request)}` : ""; } catch {}
+        this.log("error", `Deriv rejected the order: ${e.message}${req}`);
         this.engine.onOpenRejected(e.message);
       }
       return;
@@ -386,9 +442,9 @@ export class Bot extends EventEmitter {
     this.store.saveSettings(next);
     this.engine.updateSettings(next);            // pip / stop / trail changes apply to the NEXT position
     if (symbolChanged) {
-      this.engine.resetMarket(); this.lastTick = null;
+      this.engine.resetMarket(); this.lastTick = null; this.tickMoves = []; this._prevMid = null;
       this.log("info", `Symbol changed to ${next.symbol}`);
-      if (this.client?.open) this.client.send({ forget_all: "ticks" }).then(() => this._subscribeTicks(next.symbol)).catch(e => this.log("error", `Could not switch tick stream: ${e.message}`));
+      if (this.client?.open) this.client.send({ forget_all: "ticks" }).then(() => this._subscribeTicks(next.symbol)).then(() => this._loadLadder(next.symbol)).catch(e => this.log("error", `Could not switch tick stream: ${e.message}`));
     }
     if (modeChanged && this.client) { this.log("info", `Account mode changed to ${next.mode} — reconnecting`); this.client.close(); }
     if (next.enabled && !this.running) this.start({ fromBoot: true });
@@ -412,7 +468,7 @@ export class Bot extends EventEmitter {
       now: Date.now(), running: this.running, connected: this.connected, accountId: this.accountId,
       mode: this.settings.mode, balance: this.balance, currency: this.currency,
       status: s.status, symbol: this.settings.symbol, lastTick: lt,
-      position, pendingOrder: s.pending ? s.pending.type : null,
+      position, pendingOrder: s.pending ? s.pending.type : null, typicalTick: this.typicalTick(),
       stats: {
         completedTrades: s.totalTrades, realizedPnl: s.totalPnl, dailyPnl: s.dailyPnl, tradesToday: s.tradesToday,
         consecLosses: s.consecLosses, currentDrawdown: curDD, maxDrawdown: dd, execFailures: s.execFailures,

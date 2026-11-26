@@ -15,7 +15,7 @@ finish, read its direction, then enter at the next candle's open. One symbol, on
 npm install
 cp .env.example .env        # add DERIV_PAT_TOKEN, DERIV_APP_ID, DASHBOARD_PASSWORD
 npm start                   # http://127.0.0.1:3000
-npm test                    # 47 tests
+npm test                    # run the full test suite
 ```
 
 In the dashboard: pick a symbol (all 48 from the old bot are listed), set pip size / stop / trail / stake / limits,
@@ -61,3 +61,9 @@ src/server.js         dashboard API; public/index.html is the UI
 backtest/             simulator, report, run / generate-ticks / fetch-ticks
 test/                 engine rules, simulator, live flow vs fake Deriv
 ```
+
+## Safety guards worth knowing
+
+- **Stop sanity check** (Risk section of the dashboard): if the stop is smaller than *N ×* a typical tick move on the chosen symbol, the bot skips the entry (counted as `stopTooTight`) instead of opening a trade that random jitter will stop out. The preview shows your stop as a multiple of a typical tick once ticks are flowing.
+- **Multiplier**: on connect the bot asks Deriv which multipliers the symbol offers. `auto` uses the smallest. A multiplier you type that Deriv doesn't offer is rejected with the allowed list, never silently changed.
+- **Rejected orders** are logged with the exact request sent to Deriv.

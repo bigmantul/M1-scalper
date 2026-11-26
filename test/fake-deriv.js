@@ -49,6 +49,10 @@ export async function startFakeDeriv() {
       if (q.balance) return reply({ msg_type: "balance", balance: { balance: fake.balance, currency: "USD" } });
       if (q.ticks) { fake.tickSubs.add(ws); fake.symbol = q.ticks; return reply({ msg_type: "tick", tick: { symbol: q.ticks, epoch: 0, quote: fake.quote.bid, bid: fake.quote.bid, ask: fake.quote.ask } }); }
       if (q.forget_all) { fake.tickSubs.delete(ws); return reply({ msg_type: "forget_all", forget_all: [] }); }
+      if (q.contracts_for) {
+        if (!fake.ladder) return reply({ error: { code: "x", message: "contracts_for unavailable" } });
+        return reply({ msg_type: "contracts_for", contracts_for: { available: [{ contract_category: "multiplier", contract_type: "MULTUP", multiplier_range: fake.ladder }, { contract_category: "multiplier", contract_type: "MULTDOWN", multiplier_range: fake.ladder }, { contract_category: "callput", contract_type: "CALL" }] } });
+      }
       if (q.portfolio) return reply({ msg_type: "portfolio", portfolio: { contracts: [...fake.contracts.values()].filter(c => !c.sold).map(c => ({ contract_id: c.id, contract_type: c.type, symbol: fake.symbol, buy_price: c.stake, date_start: c.startTime })) } });
       if (q.proposal) {
         fake.proposals.push(q);
