@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M1 Scalper</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #14181f; --muted: #5d6675; --line: #dde1e8;
+    --accent: #1f5eff; --accent-ink: #ffffff; --good: #0d8a4f; --bad: #c62b2b; --warn: #b26a00;
+    --good-bg: #e3f5ec; --bad-bg: #fbe8e8; --warn-bg: #fff2db; --field: #fbfcfd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1117; --panel: #161b24; --ink: #e6e9ef; --muted: #98a1b1; --line: #262d3a;
+      --accent: #5b8cff; --accent-ink: #0b1020; --good: #3ccf8e; --bad: #ff6b6b; --warn: #f2b24c;
+      --good-bg: #12301f; --bad-bg: #3a1a1a; --warn-bg: #3a2c12; --field: #11151d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-bottom: 14px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 600; }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--panel); border: 1px solid var(--line); }
+  .pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .pill.ok i { background: var(--good); } .pill.err i { background: var(--bad); }
+  .pill.demo { color: var(--good); } .pill.real { color: var(--bad); border-color: var(--bad); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .c4 { grid-column: span 4; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+  @media (max-width: 860px) { .c4, .c5, .c6, .c7, .c8 { grid-column: span 12; } }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+  .stat .k { color: var(--muted); font-size: 12px; } .stat .v { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--good); } .neg { color: var(--bad); }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .banner { padding: 9px 12px; border-radius: 8px; margin-bottom: 10px; font-weight: 600; }
+  .banner.bad { background: var(--bad-bg); color: var(--bad); } .banner.warn { background: var(--warn-bg); color: var(--warn); } .banner.good { background: var(--good-bg); color: var(--good); }
+  form .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  input, select { width: 100%; font: inherit; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--field); color: var(--ink); }
+  input[type=checkbox] { width: auto; margin-right: 6px; }
+  .chk { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink); margin: 0 0 3px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px 2px; }
+  legend { padding: 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 2px 0 8px; }
+  .preview { background: var(--field); border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+  .preview b { font-variant-numeric: tabular-nums; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .scroll { overflow-x: auto; }
+  #log { height: 220px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  #log .error { color: var(--bad); } #log .warn { color: var(--warn); } #log .trade { color: var(--accent); font-weight: 600; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; } .kv div:nth-child(odd) { color: var(--muted); }
+  #login { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  #login .card { width: min(360px, 92vw); } #login .err { color: var(--bad); min-height: 20px; font-size: 13px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="card">
+    <h1 style="margin-bottom:10px">M1 Scalper</h1>
+    <label for="pw">Dashboard password</label>
+    <input id="pw" type="password" autocomplete="current-password" autofocus>
+    <div class="err" id="loginErr"></div>
+    <button class="primary" id="loginBtn" style="width:100%">Sign in</button>
+  </div>
+</div>
+
+<div class="wrap" id="app">
+  <header>
+    <h1>M1 Scalper</h1>
+    <span class="pill" id="connPill"><i></i><span id="connTxt">offline</span></span>
+    <span class="pill" id="modePill">demo</span>
+    <span class="pill" id="statusPill">—</span>
+    <span class="spacer"></span>
+    <span class="pill">Balance <b id="bal">—</b></span>
+    <button id="logout">Sign out</button>
+  </header>
+
+  <div id="banners"></div>
+
+  <div class="grid">
+    <section class="card c5">
+      <h2>Control</h2>
+      <div class="btns">
+        <button class="primary" id="btnStart">Start</button>
+        <button id="btnStop">Stop (keep trade)</button>
+        <button id="btnStopClose">Stop + close trade</button>
+        <button class="danger" id="btnEmerg">Emergency</button>
+        <button id="btnResume" class="hidden">Clear halt</button>
+      </div>
+      <p class="hint">Stop only blocks new entries; an open trade keeps its stops. Emergency stops trading and closes the trade immediately.</p>
+      <div class="kv" id="runKv"></div>
+    </section>
+
+    <section class="card c7">
+      <h2>Current position</h2>
+      <div id="posBox"></div>
+    </section>
+
+    <section class="card c12">
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <section class="card c7">
+      <h2>Settings</h2>
+      <form id="form" autocomplete="off">
+        <fieldset>
+          <legend>Market (one symbol, one position)</legend>
+          <div class="row">
+            <div><label for="symbol">Symbol to trade</label><select id="symbol"></select></div>
+            <div><label for="pip">Pip size for this symbol (price points)</label><input id="pip" type="number" step="any" min="0"></div>
+            <div><label for="mode">Account</label><select id="mode"><option value="demo">Demo</option><option value="real">Real money</option></select></div>
+          </div>
+          <p class="hint" id="symHint"></p>
+        </fieldset>
+
+        <fieldset>
+          <legend>Stops</legend>
+          <div class="row">
+            <div><label for="slPips">Initial stop-loss (pips)</label><input id="slPips" type="number" step="any" min="0"></div>
+            <div><label for="trailPips">Trailing distance (pips)</label><input id="trailPips" type="number" step="any" min="0"></div>
+            <div><label for="trailActivation">Trailing starts</label>
+              <select id="trailActivation"><option value="breakeven">At breakeven</option><option value="immediate">Immediately</option></select></div>
+          </div>
+          <div class="preview" id="preview">Calculating…</div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Position size</legend>
+          <div class="row">
+            <div><label for="sizeMode">Sizing</label><select id="sizeMode"><option value="fixed">Fixed stake ($)</option><option value="riskPct">% of balance risked at the stop</option></select></div>
+            <div><label for="stake">Stake ($)</label><input id="stake" type="number" step="any" min="0"></div>
+            <div><label for="riskPct">Risk per trade (%)</label><input id="riskPct" type="number" step="any" min="0"></div>
+            <div><label for="maxStake">Max stake ($)</label><input id="maxStake" type="number" step="any" min="0"></div>
+            <div><label for="multiplier">Multiplier</label><input id="multiplier" placeholder="auto or a number"></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Safety limits (each can be switched off)</legend>
+          <div class="row">
+            <div><label class="chk"><input type="checkbox" id="dlOn">Daily loss limit ($)</label><input id="dl" type="number" step="any" min="0"></div>
+            <div><label class="chk"><input type="checkbox" id="clOn">Max consecutive losses</label><input id="cl" type="number" step="1" min="1"></div>
+            <div><label class="chk"><input type="checkbox" id="spOn">Max spread (price points)</label><input id="sp" type="number" step="any" min="0"></div>
+          </div>
+        </fieldset>
+
+        <div class="btns"><button class="primary" type="submit">Save settings</button><span class="hint" id="saveMsg"></span></div>
+        <p class="hint">Stop / trail / pip changes apply to the next position. The symbol and account can only change while no trade is open.</p>
+      </form>
+    </section>
+
+    <section class="card c5">
+      <h2>Activity log</h2>
+      <div id="log"></div>
+    </section>
+
+    <section class="card c12">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><h2 style="margin:0">Recent trades</h2><span class="spacer"></span><button id="csv">Download CSV</button></div>
+      <div class="scroll"><table id="trades"><thead><tr>
+        <th>#</th><th>Time (UTC)</th><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>Stop at exit</th><th>Exit reason</th><th>Costs</th><th>Net P/L</th><th>Held</th>
+      </tr></thead><tbody></tbody></table></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n, d = 2) => (n == null || !Number.isFinite(n)) ? "—" : (n < 0 ? "-$" : "$") + Math.abs(n).toFixed(d);
+const cls = (n) => n > 0 ? "pos" : n < 0 ? "neg" : "";
+const px = (n) => n == null ? "—" : String(+Number(n).toPrecision(9));
+const hms = (s) => { s = Math.max(0, Math.round(s)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
+
+let token = null, state = null, settings = null, symbols = [], es = null, formDirty = false, previewTimer = null;
+try { token = sessionStorage.getItem("tok"); } catch {}
+
+async function api(path, method = "GET", body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { showLogin(); throw new Error("Signed out"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+// ── login ───────────────────────────────────────────────
+function showLogin() { $("login").classList.remove("hidden"); $("app").classList.add("hidden"); if (es) es.close(); }
+$("loginBtn").onclick = async () => {
+  $("loginErr").textContent = "";
+  try {
+    const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: $("pw").value }) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error);
+    token = j.token; try { sessionStorage.setItem("tok", token); } catch {}
+    $("pw").value = ""; boot();
+  } catch (e) { $("loginErr").textContent = e.message; }
+};
+$("pw").addEventListener("keydown", e => { if (e.key === "Enter") $("loginBtn").click(); });
+$("logout").onclick = () => { token = null; try { sessionStorage.removeItem("tok"); } catch {} showLogin(); };
+
+// ── boot ────────────────────────────────────────────────
+async function boot() {
+  try {
+    const d = await api("/api/state");
+    $("login").classList.add("hidden"); $("app").classList.remove("hidden");
+    settings = d.settings; symbols = d.symbols; state = d.snapshot;
+    buildSymbolSelect(); fillForm(); renderState(); renderTrades(d.trades);
+    $("log").innerHTML = ""; d.events.forEach(addLog);
+    connectStream();
+  } catch { showLogin(); }
+}
+
+function connectStream() {
+  if (es) es.close();
+  es = new EventSource("/api/stream?token=" + encodeURIComponent(token));
+  es.addEventListener("state", e => { state = JSON.parse(e.data); renderState(); });
+  es.addEventListener("log", e => addLog(JSON.parse(e.data)));
+  es.addEventListener("trade", async () => { try { renderTrades((await api("/api/trades?limit=50")).trades); } catch {} });
+  es.onerror = () => { /* the browser reconnects on its own; a 401 shows the login */ };
+}
+
+// ── rendering ───────────────────────────────────────────
+function renderState() {
+  const s = state; if (!s) return;
+  $("connPill").className = "pill " + (s.connected ? "ok" : s.running ? "err" : "");
+  $("connTxt").textContent = s.connected ? `connected · ${s.symbol}` : s.running ? "reconnecting…" : "stopped";
+  const mp = $("modePill"); mp.textContent = s.mode === "real" ? "REAL MONEY" : "DEMO"; mp.className = "pill " + (s.mode === "real" ? "real" : "demo");
+  $("statusPill").textContent = s.status.replace(/_/g, " ").toLowerCase();
+  $("bal").textContent = s.balance == null ? "—" : `${s.balance.toFixed(2)} ${s.currency}`;
+
+  const b = [];
+  if (s.halted) b.push(`<div class="banner bad">Trading halted: ${esc(s.halted)}</div>`);
+  else if (s.blockedReason) b.push(`<div class="banner bad">New entries are blocked: ${esc(s.blockedReason)}</div>`);
+  if (s.needsReconcile && s.running) b.push(`<div class="banner warn">Checking the broker's positions before trading…</div>`);
+  if (!s.enabled && !s.halted) b.push(`<div class="banner warn">Trading is stopped — no new entries will be opened.</div>`);
+  if (s.mode === "real" && s.enabled) b.push(`<div class="banner bad">Real-money mode is active.</div>`);
+  $("banners").innerHTML = b.join("");
+  $("btnResume").classList.toggle("hidden", !(s.halted || s.blockedReason));
+  $("btnStart").disabled = s.enabled && s.running;
+
+  const lt = s.lastTick;
+  $("runKv").innerHTML = `
+    <div>Symbol</div><div><b>${esc(s.symbol)}</b></div>
+    <div>Last price</div><div>${lt ? px((lt.bid + lt.ask) / 2) : "—"} ${lt && lt.ask - lt.bid > 0 ? `<span class="hint">(spread ${px(lt.ask - lt.bid)})</span>` : ""}</div>
+    <div>Account</div><div>${esc(s.accountId || "—")}</div>
+    <div>Open order</div><div>${esc(s.pendingOrder || "none")}</div>`;
+
+  const p = s.position;
+  if (!p) $("posBox").innerHTML = `<p class="hint" style="margin:0">Flat. The bot enters at the start of the next candle after a completed bullish (BUY) or bearish (SELL) M1 candle.</p>`;
+  else $("posBox").innerHTML = `
+    <div class="stats">
+      <div class="stat"><div class="k">Direction</div><div class="v ${p.side === "BUY" ? "pos" : "neg"}">${p.side}</div></div>
+      <div class="stat"><div class="k">Entry</div><div class="v">${px(p.entryPrice)}</div></div>
+      <div class="stat"><div class="k">Current stop</div><div class="v">${px(p.effectiveSl)}</div></div>
+      <div class="stat"><div class="k">Floating P/L</div><div class="v ${cls(p.floatingPnl)}">${money(p.floatingPnl, 4)}</div></div>
+    </div>
+    <div class="kv" style="margin-top:10px">
+      <div>Initial stop</div><div>${px(p.initialSl)} <span class="hint">(${p.slPips} pips)</span></div>
+      <div>Trailing</div><div>${p.trailActive ? `<b class="pos">active</b>` : "waiting"} · ${p.trailPips} pips · ${p.trailActivation}</div>
+      <div>Best price since entry</div><div>${px(p.extreme)}</div>
+      <div>Stake / multiplier</div><div>$${p.stake} × ${p.multiplier}</div>
+      <div>Open for</div><div>${hms(s.now / 1000 - p.entryEpoch)}</div>
+      <div>Contract</div><div>${esc(p.contractId || "—")}</div>
+    </div>`;
+
+  const st = s.stats;
+  $("stats").innerHTML = [
+    ["Completed trades", st.completedTrades],
+    ["Realised P/L", `<span class="${cls(st.realizedPnl)}">${money(st.realizedPnl)}</span>`],
+    ["Today", `<span class="${cls(st.dailyPnl)}">${money(st.dailyPnl)}</span> <span class="hint">(${st.tradesToday} trades)</span>`],
+    ["Current drawdown", money(st.currentDrawdown)],
+    ["Max drawdown", money(st.maxDrawdown)],
+    ["Consecutive losses", st.consecLosses],
+  ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+
+  $("mode").querySelector('option[value="real"]').disabled = !s.realAllowed;
+}
+
+function renderTrades(list) {
+  $("trades").querySelector("tbody").innerHTML = list.map(t => `<tr>
+    <td>${t.id}</td><td>${new Date(t.exitEpoch * 1000).toISOString().slice(5, 19).replace("T", " ")}</td><td>${esc(t.symbol)}</td>
+    <td class="${t.side === "BUY" ? "pos" : "neg"}">${t.side}</td><td>${px(t.entryPrice)}</td><td>${px(t.exitPrice)}</td><td>${px(t.finalStop)}</td>
+    <td>${esc(t.exitReason)}</td><td>${money(t.tradingCosts, 4)}</td><td class="${cls(t.netPnl)}">${money(t.netPnl, 4)}</td><td>${hms(t.durationSecs)}</td></tr>`).join("")
+    || `<tr><td colspan="11" class="hint">No trades yet.</td></tr>`;
+}
+
+function addLog(ev) {
+  const box = $("log"), near = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const d = document.createElement("div"); d.className = ev.level;
+  d.textContent = `${new Date(ev.t).toISOString().slice(11, 19)}  ${ev.message}`;
+  box.appendChild(d);
+  while (box.childElementCount > 300) box.firstChild.remove();
+  if (near) box.scrollTop = box.scrollHeight;
+}
+
+// ── settings form ───────────────────────────────────────
+function buildSymbolSelect() {
+  const groups = {};
+  symbols.forEach(s => (groups[s.group] ||= []).push(s));
+  $("symbol").innerHTML = Object.entries(groups).map(([g, list]) => `<optgroup label="${esc(g)}">${list.map(s => `<option value="${esc(s.symbol)}">${esc(s.symbol)}</option>`).join("")}</optgroup>`).join("");
+}
+const symInfo = (sym) => symbols.find(s => s.symbol === sym);
+
+function fillForm() {
+  const s = settings, f = (id, v) => { $(id).value = v; };
+  f("symbol", s.symbol); f("mode", s.mode); f("slPips", s.slPips); f("trailPips", s.trailPips); f("trailActivation", s.trailActivation);
+  f("pip", symInfo(s.symbol)?.pip ?? ""); f("sizeMode", s.sizing.mode); f("stake", s.sizing.stake); f("riskPct", s.sizing.riskPct); f("maxStake", s.sizing.maxStake);
+  f("multiplier", s.multiplier);
+  $("dlOn").checked = s.risk.dailyLossEnabled; f("dl", s.risk.dailyLossUsd);
+  $("clOn").checked = s.risk.consecLossEnabled; f("cl", s.risk.consecLossMax);
+  $("spOn").checked = s.risk.spreadFilterEnabled; f("sp", s.risk.maxSpreadPoints);
+  symHint(); formDirty = false; schedulePreview();
+}
+
+function symHint() {
+  const i = symInfo($("symbol").value);
+  $("symHint").textContent = i ? `${i.group} · ${i.decimals} decimals · default pip ${i.defaultPip} · multiplier options ≈ ${i.ladder.join(", ")}` : "";
+}
+
+function readForm() {
+  const n = (id) => Number($(id).value);
+  const m = $("multiplier").value.trim().toLowerCase();
+  const sym = $("symbol").value;
+  return {
+    symbol: sym, mode: $("mode").value, slPips: n("slPips"), trailPips: n("trailPips"), trailActivation: $("trailActivation").value,
+    pipSizes: { [sym]: n("pip") }, multiplier: (m === "" || m === "auto") ? "auto" : Number(m),
+    sizing: { mode: $("sizeMode").value, stake: n("stake"), riskPct: n("riskPct"), maxStake: n("maxStake") },
+    risk: { dailyLossEnabled: $("dlOn").checked, dailyLossUsd: n("dl"), consecLossEnabled: $("clOn").checked, consecLossMax: n("cl"), spreadFilterEnabled: $("spOn").checked, maxSpreadPoints: n("sp") },
+  };
+}
+
+$("symbol").addEventListener("change", () => { $("pip").value = symInfo($("symbol").value)?.pip ?? ""; symHint(); });
+$("form").addEventListener("input", () => { formDirty = true; schedulePreview(); });
+
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    try {
+      const p = await api("/api/risk-preview", "POST", { settings: readForm() });
+      if (p.error) { $("preview").innerHTML = `<span class="neg">${esc(p.error)}</span>`; return; }
+      const parts = [`1 pip = <b>${px(p.pipSize)}</b> price points`,
+        `stop <b>${px(p.slPoints)}</b> pts${p.slPctOfPrice != null ? ` (${p.slPctOfPrice.toFixed(3)}% of price)` : ""}`,
+        `trail <b>${px(p.trailPoints)}</b> pts${p.trailPctOfPrice != null ? ` (${p.trailPctOfPrice.toFixed(3)}%)` : ""}`];
+      let tail = "";
+      if (p.stake != null) tail = `<br>At stake <b>$${p.stake}</b> × ${p.multiplier}: the initial stop loses about <b>${money(p.riskUsd, 4)}</b>` + (p.nativeStopUsd ? `, sent to Deriv as a $${p.nativeStopUsd} server-side stop.` : `. <span class="neg">That is below Deriv's minimum stop, so no server-side stop would be placed — only the bot's own stop protects the trade.</span>`);
+      else if (p.error == null && p.multiplier) tail = `<br>Multiplier ${p.multiplier}. Price not available yet to size the stop in dollars.`;
+      $("preview").innerHTML = parts.join(" · ") + tail;
+    } catch (e) { $("preview").textContent = e.message; }
+  }, 250);
+}
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault(); $("saveMsg").textContent = "Saving…";
+  try {
+    const r = await api("/api/settings", "POST", { settings: readForm() });
+    settings = r.settings; symbols = r.symbols; fillForm();
+    $("saveMsg").textContent = "Saved ✓"; setTimeout(() => $("saveMsg").textContent = "", 3000);
+  } catch (e) { $("saveMsg").textContent = "Not saved: " + e.message; }
+});
+
+// ── controls ────────────────────────────────────────────
+const act = (path, body, confirmMsg) => async () => {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try { await api(path, "POST", body); } catch (e) { alert(e.message); }
+};
+$("btnStart").onclick = async () => {
+  if (formDirty && !confirm("You have unsaved setting changes. Start with the SAVED settings?")) return;
+  if (state?.mode === "real" && !confirm("Start trading with REAL money?")) return;
+  try { await api("/api/bot/start", "POST"); } catch (e) { alert(e.message); }
+};
+$("btnStop").onclick = act("/api/bot/stop", { closePosition: false });
+$("btnStopClose").onclick = act("/api/bot/stop", { closePosition: true }, "Stop trading and close the open trade now?");
+$("btnEmerg").onclick = act("/api/bot/emergency", {}, "EMERGENCY: stop trading and close the open trade immediately?");
+$("btnResume").onclick = act("/api/bot/resume", {});
+$("csv").onclick = async () => {
+  const r = await fetch("/api/trades.csv", { headers: { Authorization: "Bearer " + token } });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "trades.csv"; a.click();
+};
+
+if (token) boot(); else showLogin();
+</script>
+</body>
+</html>
