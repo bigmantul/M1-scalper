@@ -25,6 +25,18 @@ export function createApp({ bot, password }) {
   app.use(express.json({ limit: "50kb" }));
   app.use((_, res, next) => { res.set({ "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store" }); next(); });
 
+  // Behind Render's proxy the real client IP is in X-Forwarded-For (needed for the login rate limit)
+  if (process.env.TRUST_PROXY || process.env.RENDER) app.set("trust proxy", 1);
+
+  // ── health (no login, no secrets) ─────────────────────
+  // Render calls this to decide whether the service is alive. It reports the PROCESS, not Deriv:
+  // a Deriv outage must not make Render kill and restart a bot that is managing an open trade.
+  const startedAt = Date.now();
+  const health = (_, res) => res.json({ ok: true, uptimeSecs: Math.round((Date.now() - startedAt) / 1000), botRunning: bot.running, derivConnected: bot.connected });
+  app.get("/health", health);
+  app.get("/healthz", health);
+  app.get("/ping", (_, res) => res.type("text").send("pong"));
+
   // ── auth ──────────────────────────────────────────────
   const tokens = new Map();                         // token -> expiry ms
   const fails = new Map();                          // ip -> {n, until}
@@ -126,6 +138,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`Mode: ${bot.settings.mode} | symbol: ${bot.settings.symbol} | trading ${bot.settings.enabled ? "ENABLED" : "stopped"}`);
     bot.autoStart();
   });
+  // Optional keep-alive: pings this service's own public URL so an idle instance is not spun down.
+  // (Only useful on hosts that sleep idle services. Real trading belongs on an always-on paid instance.)
+  const publicUrl = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL;
+  if (process.env.KEEP_ALIVE === "true" && publicUrl) {
+    setInterval(() => fetch(`${publicUrl}/ping`).catch(() => {}), 10 * 60 * 1000).unref();
+    console.log(`Keep-alive ping enabled → ${publicUrl}/ping every 10 min`);
+  }
   const bye = async () => { console.log("Shutting down…"); await bot.shutdown(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 2000); };
   process.on("SIGINT", bye); process.on("SIGTERM", bye);
   process.on("unhandledRejection", (e) => bot.log("error", `Unhandled rejection: ${e?.message || e}`));

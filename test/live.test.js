@@ -265,3 +265,19 @@ test("dashboard API: auth, settings validation, live risk preview", async () => 
     assert.ok(Math.abs(pv.body.slPoints - 2) < 1e-9);
   } finally { srv.close(); await teardown(); }
 });
+
+test("health and ping endpoints answer without a login and leak nothing sensitive", async () => {
+  const { bot, teardown } = await setup();
+  const app = createApp({ bot, password: "correct-horse" });
+  const srv = await new Promise(r => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    for (const p of ["/health", "/healthz"]) {
+      const r = await fetch(base + p); const j = await r.json();
+      assert.equal(r.status, 200); assert.equal(j.ok, true);
+      assert.deepEqual(Object.keys(j).sort(), ["botRunning", "derivConnected", "ok", "uptimeSecs"]);
+    }
+    assert.equal(await (await fetch(base + "/ping")).text(), "pong");
+    assert.equal((await fetch(base + "/api/state")).status, 401, "everything else still needs the password");
+  } finally { srv.close(); await teardown(); }
+});

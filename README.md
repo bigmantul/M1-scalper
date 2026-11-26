@@ -7,6 +7,8 @@ candle's direction (bullish → BUY, bearish → SELL, doji → stay flat). Fixe
 trailing stop (default 15 pips), **no take profit**. When a stop closes the trade, wait for the current candle to
 finish, read its direction, then enter at the next candle's open. One symbol, one position at a time.
 
+**Deploying on Render + operating the bot → see [DEPLOY.md](DEPLOY.md).** `/health` is the health-check endpoint.
+
 ## Run it
 
 ```bash
