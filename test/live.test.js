@@ -339,3 +339,14 @@ test("stop far smaller than normal tick noise: entry skipped, nothing sent, not 
     assert.equal(bot.engine.s.execFailures, 0);
   } finally { await teardown(); }
 });
+
+test("a server-side stop under Deriv's $0.10 minimum is not sent (even if old settings say 0.01)", async () => {
+  // pip 0.1: 2-point stop on ~101 with stake 10 x 5 -> ~$0.99, fine; use stake 1 x 5 -> ~$0.10 boundary below
+  const { fake, bot, teardown } = await setup({ settings: { pipSizes: { R_100: 0.05 }, multiplier: 5, sizing: { mode: "fixed", stake: 1 }, risk: { minNativeStopUsd: 0.01 } } });
+  try {
+    bot.start(); await until(() => bot.connected);
+    await bullishSignal(fake);
+    await until(() => fake.proposals.length >= 1);
+    assert.equal(fake.proposals[0].limit_order, undefined, "~$0.05 stop is below $0.10: only the bot's own stop");
+  } finally { await teardown(); }
+});

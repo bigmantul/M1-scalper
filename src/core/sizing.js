@@ -21,6 +21,10 @@ export function pickMultiplier(settings, symbol) {
  *   nativeStopUsd = the server-side stop amount to send with the order (null if below
  *                   Deriv's minimum, in which case only the bot's own stop protects the trade)
  */
+/** Deriv rejects server-side stops under $0.10; a lower value saved in old settings is raised to that floor. */
+export const DERIV_MIN_STOP_USD = 0.10;
+export const minNative = (settings) => Math.max(DERIV_MIN_STOP_USD, Number(settings.risk.minNativeStopUsd) || 0);
+
 export function computeSize(settings, { symbol, balance, entryPrice, slDist }) {
   const notes = [];
   const multiplier = pickMultiplier(settings, symbol);
@@ -48,8 +52,8 @@ export function computeSize(settings, { symbol, balance, entryPrice, slDist }) {
 
   const riskUsd = stake * multiplier * slFrac;
   let nativeStopUsd = +riskUsd.toFixed(2);
-  if (nativeStopUsd < settings.risk.minNativeStopUsd) {
-    notes.push(`initial stop is only $${riskUsd.toFixed(4)}, below the minimum server-side stop ($${settings.risk.minNativeStopUsd}); only the bot's own stop will protect this trade`);
+  if (nativeStopUsd < minNative(settings)) {
+    notes.push(`initial stop is only $${riskUsd.toFixed(4)}, below the minimum server-side stop ($${minNative(settings)}); only the bot's own stop will protect this trade`);
     nativeStopUsd = null;
   } else if (nativeStopUsd >= stake) {
     notes.push(`initial stop $${nativeStopUsd} is >= stake, so the contract will stop out at the stake first`);
@@ -78,6 +82,6 @@ export function riskPreview(settings, { symbol, refPrice, balance = 0 }) {
 /** Server-side stop amount (USD) for a given stake/multiplier, or null if it can't be placed. */
 export function nativeStopUsd(settings, { stake, multiplier, slDist, entryPrice }) {
   const usd = +(stake * multiplier * (slDist / entryPrice)).toFixed(2);
-  if (usd < settings.risk.minNativeStopUsd || usd >= stake) return null;
+  if (usd < minNative(settings) || usd >= stake) return null;
   return usd;
 }

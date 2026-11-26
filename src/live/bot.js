@@ -19,7 +19,7 @@ import { EventEmitter } from "node:events";
 import { DerivClient, getWebSocketUrl } from "./deriv.js";
 import { ScalperEngine, STATUS } from "../core/engine.js";
 import { validateSettings, deepMerge, pipSizeFor } from "../core/settings.js";
-import { nativeStopUsd, pnlFor } from "../core/sizing.js";
+import { nativeStopUsd, pnlFor, minNative } from "../core/sizing.js";
 import { symbolMeta, SYMBOL_META, setLadder } from "../../config/symbols.js";
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -181,7 +181,7 @@ export class Bot extends EventEmitter {
   /** Asks Deriv which multipliers this symbol really offers (built-in lists can be out of date). */
   async _loadLadder(symbol) {
     try {
-      const r = await this.client.send({ contracts_for: symbol, currency: this.currency });
+      const r = await this.client.send({ contracts_for: symbol });
       const ladder = parseMultiplierRanges(r);
       if (ladder.length) { setLadder(symbol, ladder); this.log("info", `Deriv offers multipliers ${ladder.join("/")} on ${symbol}`); }
       else this.log("warn", `Deriv did not list multipliers for ${symbol}; using the built-in list`);
@@ -263,7 +263,7 @@ export class Bot extends EventEmitter {
     if (!nativeStop) {
       const usd = cmd.stake * multiplier * (snap.slDist / cmd.refPrice);
       const why = usd >= cmd.stake ? `the stop would lose $${usd.toFixed(2)}, which is not less than the $${cmd.stake} stake`
-        : `the stop is only $${usd.toFixed(4)}, below Deriv's $${this.settings.risk.minNativeStopUsd} minimum`;
+        : `the stop is only $${usd.toFixed(4)}, below Deriv's $${minNative(this.settings)} minimum`;
       this.log("warn", `No server-side stop placed: ${why}. Only the bot's own stop protects this trade`);
     }
     let prop;

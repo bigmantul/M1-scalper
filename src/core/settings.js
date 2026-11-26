@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS = {
     spreadFilterEnabled: false, maxSpreadPoints: 0,
     stopSanityEnabled: true,   minStopTicks: 1,   // block entries when the stop is smaller than N typical ticks of movement
     maxExecFailures: 3,        // consecutive order failures before the bot disables itself
-    minNativeStopUsd: 0.01,    // smallest server-side stop Deriv will accept
+    minNativeStopUsd: 0.10,    // smallest server-side stop Deriv will accept
   },
 
   // backtest-only cost model (the live bot pays real spread / slippage)

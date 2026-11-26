@@ -115,7 +115,7 @@ export function createApp({ bot, password }) {
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     send("state", bot.snapshot());
     const timer = setInterval(() => send("state", bot.snapshot()), 1000);
-    const onEvent = (ev) => send("log", ev), onTrade = (t) => send("trade", t);
+    const onEvent = (ev) => { if (ev.level !== "debug") send("log", ev); }, onTrade = (t) => send("trade", t);
     bot.on("event", onEvent); bot.on("trade", onTrade);
     req.on("close", () => { clearInterval(timer); bot.off("event", onEvent); bot.off("trade", onTrade); });
   });
