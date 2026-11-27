@@ -129,6 +129,28 @@
         <fieldset>
           <legend>Stops</legend>
           <div class="row">
+            <div><label for="exitModel">Exit model</label>
+              <select id="exitModel"><option value="candle_step">Candle SL + breakeven + step trail</option><option value="legacy">Fixed SL + fixed trail (original)</option></select></div>
+          </div>
+          <div id="candleBox">
+            <p class="hint">Initial stop = the signal candle's low (BUY) or high (SELL). No take profit. The stop only ever moves forward.</p>
+            <div class="row">
+              <div><label class="chk"><input type="checkbox" id="beOn">Breakeven</label></div>
+              <div><label for="beTrig">Breakeven trigger (pips)</label><input id="beTrig" type="number" step="any" min="0"></div>
+              <div><label for="beBuf">Breakeven buffer (pips)</label><input id="beBuf" type="number" step="any" min="0"></div>
+            </div>
+            <div class="row">
+              <div><label class="chk"><input type="checkbox" id="stpOn">Step trailing stop</label></div>
+              <div><label for="stpStep">Trail step (pips)</label><input id="stpStep" type="number" step="any" min="0"></div>
+              <div><label for="stpOff">Lock offset (pips)</label><input id="stpOff" type="number" step="any" min="0"></div>
+            </div>
+            <div class="row">
+              <div><label for="cslPol">If the candle's extreme is not a valid stop</label>
+                <select id="cslPol"><option value="reject">Skip the entry</option><option value="fallback">Use a fallback distance</option></select></div>
+              <div><label for="cslFb">Fallback distance (pips)</label><input id="cslFb" type="number" step="any" min="0"></div>
+            </div>
+          </div>
+          <div class="row" id="legacyBox">
             <div><label for="slPips">Initial stop-loss (pips)</label><input id="slPips" type="number" step="any" min="0"></div>
             <div><label for="trailPips">Trailing distance (pips)</label><input id="trailPips" type="number" step="any" min="0"></div>
             <div><label for="trailActivation">Trailing starts</label>
@@ -269,7 +291,11 @@ function renderState() {
     </div>
     <div class="kv" style="margin-top:10px">
       <div>Initial stop</div><div>${px(p.initialSl)} <span class="hint">(${p.slPips} pips)</span></div>
-      <div>Trailing</div><div>${p.trailActive ? `<b class="pos">active</b>` : "waiting"} · ${p.trailPips} pips · ${p.trailActivation}</div>
+      ${p.model === "candle_step"
+        ? `<div>Breakeven</div><div>${p.breakevenReached ? `<b class="pos">reached</b>` : "waiting"} (at +${p.be?.triggerPips} pips)</div>
+      <div>Step trail</div><div>${p.lockedPips > 0 ? `<b class="pos">locking +${p.lockedPips} pips</b>` : "waiting"} · step ${p.step?.stepPips} / offset ${p.step?.lockOffsetPips}</div>
+      <div>Max profit so far</div><div>${(p.maxProfitPips || 0).toFixed(1)} pips</div>`
+        : `<div>Trailing</div><div>${p.trailActive ? `<b class="pos">active</b>` : "waiting"} · ${p.trailPips} pips · ${p.trailActivation}</div>`}
       <div>Best price since entry</div><div>${px(p.extreme)}</div>
       <div>Stake / multiplier</div><div>$${p.stake} × ${p.multiplier}</div>
       <div>Open for</div><div>${hms(s.now / 1000 - p.entryEpoch)}</div>
@@ -316,6 +342,9 @@ const symInfo = (sym) => symbols.find(s => s.symbol === sym);
 
 function fillForm() {
   const s = settings, f = (id, v) => { $(id).value = v; };
+  f("exitModel", s.exitModel); $("beOn").checked = s.breakeven.enabled; f("beTrig", s.breakeven.triggerPips); f("beBuf", s.breakeven.bufferPips);
+  $("stpOn").checked = s.stepTrail.enabled; f("stpStep", s.stepTrail.stepPips); f("stpOff", s.stepTrail.lockOffsetPips);
+  f("cslPol", s.candleSl.policy); f("cslFb", s.candleSl.fallbackPips); showModel();
   f("symbol", s.symbol); f("mode", s.mode); f("slPips", s.slPips); f("trailPips", s.trailPips); f("trailActivation", s.trailActivation);
   f("pip", symInfo(s.symbol)?.pip ?? ""); f("sizeMode", s.sizing.mode); f("stake", s.sizing.stake); f("riskPct", s.sizing.riskPct); f("maxStake", s.sizing.maxStake);
   f("multiplier", s.multiplier);
@@ -325,6 +354,12 @@ function fillForm() {
   $("stOn").checked = s.risk.stopSanityEnabled; f("st", s.risk.minStopTicks);
   symHint(); formDirty = false; schedulePreview();
 }
+
+function showModel() {
+  const c = $("exitModel").value === "candle_step";
+  $("candleBox").style.display = c ? "" : "none"; $("legacyBox").style.display = c ? "none" : "";
+}
+$("exitModel").addEventListener("change", showModel);
 
 function symHint() {
   const i = symInfo($("symbol").value);
@@ -336,6 +371,10 @@ function readForm() {
   const m = $("multiplier").value.trim().toLowerCase();
   const sym = $("symbol").value;
   return {
+    exitModel: $("exitModel").value,
+    breakeven: { enabled: $("beOn").checked, triggerPips: n("beTrig"), bufferPips: n("beBuf") },
+    stepTrail: { enabled: $("stpOn").checked, stepPips: n("stpStep"), lockOffsetPips: n("stpOff") },
+    candleSl: { policy: $("cslPol").value, fallbackPips: n("cslFb") },
     symbol: sym, mode: $("mode").value, slPips: n("slPips"), trailPips: n("trailPips"), trailActivation: $("trailActivation").value,
     pipSizes: { [sym]: n("pip") }, multiplier: (m === "" || m === "auto") ? "auto" : Number(m),
     sizing: { mode: $("sizeMode").value, stake: n("stake"), riskPct: n("riskPct"), maxStake: n("maxStake") },
@@ -352,9 +391,10 @@ function schedulePreview() {
     try {
       const p = await api("/api/risk-preview", "POST", { settings: readForm() });
       if (p.error) { $("preview").innerHTML = `<span class="neg">${esc(p.error)}</span>`; return; }
-      const parts = [`1 pip = <b>${px(p.pipSize)}</b> price points`,
-        `stop <b>${px(p.slPoints)}</b> pts${p.slPctOfPrice != null ? ` (${p.slPctOfPrice.toFixed(3)}% of price)` : ""}`,
-        `trail <b>${px(p.trailPoints)}</b> pts${p.trailPctOfPrice != null ? ` (${p.trailPctOfPrice.toFixed(3)}%)` : ""}`];
+      const parts = [`1 pip = <b>${px(p.pipSize)}</b> price points`];
+      if (p.candleStop) parts.push(`breakeven at <b>${px(p.breakevenPoints)}</b> pts profit`, `trail step <b>${px(p.stepPoints)}</b> pts`, `initial stop = signal candle extreme (sized here with the ${px(p.slPoints)}-pt fallback)`);
+      else parts.push(`stop <b>${px(p.slPoints)}</b> pts${p.slPctOfPrice != null ? ` (${p.slPctOfPrice.toFixed(3)}% of price)` : ""}`,
+        `trail <b>${px(p.trailPoints)}</b> pts${p.trailPctOfPrice != null ? ` (${p.trailPctOfPrice.toFixed(3)}%)` : ""}`);
       let tail = "";
       if (p.stopInTicks != null) {
         const k = p.stopInTicks, bad = k < p.minStopTicks, weak = k < 3;

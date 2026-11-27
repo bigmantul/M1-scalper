@@ -11,7 +11,7 @@ const K = (n) => T0 + 60 * n;           // epoch of candle n
 function mkSettings(patch = {}) {
   return validateSettings({
     enabled: true, symbol: "R_100", pipSizes: { R_100: 1 },
-    slPips: 20, trailPips: 15, trailActivation: "breakeven",
+    exitModel: "legacy", slPips: 20, trailPips: 15, trailActivation: "breakeven",
     sizing: { mode: "fixed", stake: 10 },
     ...patch,
   });
@@ -396,4 +396,100 @@ test("onOpenSkipped clears the pending order and counts the block", () => {
   assert.equal(h.engine.s.blocked.stopTooTight, 1);
   assert.equal(h.engine.s.execFailures, 0);
   assert.equal(h.engine.status, STATUS.WAITING_FOR_NEXT_CANDLE);
+});
+
+// ── candle-SL + breakeven + step-trail model ─────────
+const cs = (extra = {}) => harness({ exitModel: "candle_step", ...extra });
+/** bullish signal candle O100 H103 L95 C101 → BUY at 101 on the next candle's first tick; initial SL = 95 */
+function bullOpen(h) {
+  h.step(K(0), 100); h.step(K(0) + 10, 103); h.step(K(0) + 20, 95); h.step(K(0) + 59, 101);
+  h.step(K(1), 101);
+}
+
+test("candle model: initial SL is the signal candle's low (BUY) — not a fixed pip distance", () => {
+  const h = cs(); bullOpen(h);
+  assert.equal(h.engine.position.initialSl, 95);
+  assert.equal(h.engine.position.slPips, 6);
+});
+
+test("candle model: SELL uses the signal candle's high", () => {
+  const h = cs();
+  h.step(K(0), 100); h.step(K(0) + 10, 105); h.step(K(0) + 20, 97); h.step(K(0) + 59, 99); h.step(K(1), 99);
+  assert.equal(h.engine.position.side, "SELL");
+  assert.equal(h.engine.position.initialSl, 105);
+});
+
+test("candle model: breakeven at +5, then +5 locked at +10, +15 locked at +20 (default 5/5/5)", () => {
+  const h = cs(); bullOpen(h);                    // entry 101
+  h.step(K(1) + 5, 105);  assert.equal(h.engine.position.effectiveSl, 95, "+4: nothing yet");
+  h.step(K(1) + 6, 106);  assert.equal(h.engine.position.effectiveSl, 101, "+5: breakeven");
+  assert.equal(h.engine.position.breakevenReached, true);
+  h.step(K(1) + 7, 111);  assert.equal(h.engine.position.effectiveSl, 106, "+10: lock +5");
+  h.step(K(1) + 8, 121);  assert.equal(h.engine.position.effectiveSl, 116, "+20: lock +15 (jumped several milestones)");
+});
+
+test("candle model: SELL mirrors the BUY ladder", () => {
+  const h = cs();
+  h.step(K(0), 100); h.step(K(0) + 10, 105); h.step(K(0) + 20, 97); h.step(K(0) + 59, 99); h.step(K(1), 99);   // SELL @99
+  h.step(K(1) + 5, 79);                                  // +20 pips in favour
+  assert.equal(h.engine.position.effectiveSl, 84, "entry - 15");
+});
+
+test("candle model: a retracement never loosens the stop; MFE keeps the milestone", () => {
+  const h = cs(); bullOpen(h);
+  h.step(K(1) + 5, 121);                                  // +20 → SL 116
+  h.step(K(1) + 6, 113);                                  // back to +12: still above 116? no → 113 < 116 → hit
+  assert.equal(h.closes.length, 1);
+  assert.equal(h.trades[0].exitReason, "trailing_stop");
+  assert.equal(h.trades[0].lockedProfitPips, 15);
+  const h2 = cs(); bullOpen(h2);
+  h2.step(K(1) + 5, 121); h2.step(K(1) + 6, 118);         // 118 > 116: retracement, stop stays
+  assert.equal(h2.engine.position.effectiveSl, 116);
+  h2.step(K(1) + 7, 126);                                 // +25 → +20 locked
+  assert.equal(h2.engine.position.effectiveSl, 121);
+});
+
+test("candle model: exit reasons are initial / breakeven / trailing", () => {
+  const a = cs(); bullOpen(a); a.step(K(1) + 5, 94);
+  assert.equal(a.trades[0].exitReason, "initial_stop");
+  const b = cs(); bullOpen(b); b.step(K(1) + 5, 106); b.step(K(1) + 6, 101);
+  assert.equal(b.trades[0].exitReason, "breakeven_stop");
+  assert.ok(Math.abs(b.trades[0].exitPrice - 101) < 1e-9);
+});
+
+test("candle model: breakeven and trailing are independent switches", () => {
+  const noBe = cs({ breakeven: { enabled: false } }); bullOpen(noBe);
+  noBe.step(K(1) + 5, 106); assert.equal(noBe.engine.position.effectiveSl, 95, "no breakeven");
+  noBe.step(K(1) + 6, 111); assert.equal(noBe.engine.position.effectiveSl, 106, "trail still locks at +10");
+  const noTrail = cs({ stepTrail: { enabled: false } }); bullOpen(noTrail);
+  noTrail.step(K(1) + 5, 126); assert.equal(noTrail.engine.position.effectiveSl, 101, "breakeven only");
+});
+
+test("candle model: breakeven buffer moves the stop beyond entry", () => {
+  const h = cs({ breakeven: { bufferPips: 1 } }); bullOpen(h);
+  h.step(K(1) + 5, 106); assert.equal(h.engine.position.effectiveSl, 102);
+});
+
+test("candle model: no valid stop (candle low at/above the ask) → entry rejected, or fallback pips if configured", () => {
+  // bullish candle whose low is above the next tick's ask (gap down)
+  const gap = (h) => { h.step(K(0), 100); h.step(K(0) + 20, 101); h.step(K(0) + 59, 101); h.step(K(1), 99); };
+  const a = cs(); gap(a);
+  assert.equal(a.opens.length, 0); assert.equal(a.engine.s.blocked.invalidCandleSl, 1);
+  const b = cs({ candleSl: { policy: "fallback", fallbackPips: 20 } }); gap(b);
+  assert.equal(b.opens.length, 1); assert.equal(b.engine.position.initialSl, 99 - 20);
+});
+
+test("candle model: position state survives serialize/restore (restart after trailing)", () => {
+  const h = cs(); bullOpen(h); h.step(K(1) + 5, 121);
+  const saved = h.engine.serialize();
+  const e2 = new ScalperEngine(h.settings); e2.restore(saved);
+  assert.equal(e2.position.effectiveSl, 116);
+  assert.equal(e2.position.lockedPips, 15);
+  assert.equal(e2.position.breakevenReached, true);
+  assert.equal(e2.position.maxProfitPips, 20);
+});
+
+test("candle model: a fixed-pip distance is never used for the initial stop", () => {
+  const h = cs({ slPips: 50 }); bullOpen(h);
+  assert.equal(h.engine.position.initialSl, 95);
 });

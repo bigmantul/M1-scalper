@@ -87,7 +87,7 @@ export function createApp({ bot, password }) {
       const lt = bot.lastTick && bot.settings.symbol === merged.symbol ? (bot.lastTick.bid + bot.lastTick.ask) / 2 : Number(req.body?.price) || null;
       const out = riskPreview(merged, { symbol: merged.symbol, refPrice: lt, balance: bot.balance || 0 });
       const tt = bot.settings.symbol === merged.symbol ? bot.typicalTick() : null;
-      if (tt && out?.slPoints) { out.typicalTick = tt; out.stopInTicks = out.slPoints / tt; out.minStopTicks = merged.risk.minStopTicks; }
+      if (tt && out?.slPoints && !out.candleStop) { out.typicalTick = tt; out.stopInTicks = out.slPoints / tt; out.minStopTicks = merged.risk.minStopTicks; }
       res.json(out);
     } catch (e) { res.status(400).json({ error: e.message }); }
   });

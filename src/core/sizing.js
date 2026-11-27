@@ -65,9 +65,12 @@ export function computeSize(settings, { symbol, balance, entryPrice, slDist }) {
 /** What the dashboard shows next to the pip inputs so the user sees the real-money meaning. */
 export function riskPreview(settings, { symbol, refPrice, balance = 0 }) {
   const pip = settings.pipSizes?.[symbol] ?? symbolMeta(symbol).pipSize;
-  const slDist = settings.slPips * pip, trailDist = settings.trailPips * pip;
+  const candle = settings.exitModel === "candle_step";
+  // candle model: the real stop is the signal candle's extreme (unknown until it closes) — size the preview with the fallback distance
+  const slDist = (candle ? settings.candleSl.fallbackPips : settings.slPips) * pip, trailDist = (candle ? settings.stepTrail.stepPips : settings.trailPips) * pip;
   const out = {
-    symbol, pipSize: pip, slPoints: slDist, trailPoints: trailDist,
+    symbol, pipSize: pip, slPoints: slDist, trailPoints: trailDist, candleStop: candle,
+    ...(candle ? { breakevenPoints: settings.breakeven.triggerPips * pip, stepPoints: settings.stepTrail.stepPips * pip } : {}),
     slPctOfPrice: refPrice ? (slDist / refPrice) * 100 : null,
     trailPctOfPrice: refPrice ? (trailDist / refPrice) * 100 : null,
     multiplier: pickMultiplier(settings, symbol),

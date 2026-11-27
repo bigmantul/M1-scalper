@@ -67,6 +67,43 @@ export function manageStop(pos, tick) {
   return { hit: false, exitPx, extreme, trailSl, effectiveSl };
 }
 
+/**
+ * Pure stop maths for the candle-SL / breakeven / step-trail model, ONE tick.
+ * Locked profit is driven by the maximum favourable excursion (MFE), so a retracement never forgets a milestone,
+ * and a price jump across several milestones goes straight to the highest valid stop. The stop only moves forward.
+ */
+export function manageStepStop(pos, tick) {
+  const buy = pos.side === "BUY", sign = buy ? 1 : -1;
+  const exitPx = buy ? tick.bid : tick.ask;
+  const hit = buy ? exitPx <= pos.effectiveSl : exitPx >= pos.effectiveSl;    // stop in force BEFORE this tick
+  if (hit) return { hit: true, exitPx };
+
+  const extreme = buy ? Math.max(pos.extreme, exitPx) : Math.min(pos.extreme, exitPx);
+  const maxProfitPips = Math.max(pos.maxProfitPips || 0, ((extreme - pos.entryPrice) * sign) / pos.pip);
+  const EPS = 1e-9;
+  let effectiveSl = pos.effectiveSl, breakevenReached = !!pos.breakevenReached, lockedPips = pos.lockedPips || 0;
+  const move = (px) => { effectiveSl = buy ? Math.max(effectiveSl, px) : Math.min(effectiveSl, px); };
+
+  const be = pos.be;
+  if (be?.enabled && maxProfitPips + EPS >= be.triggerPips) {
+    breakevenReached = true;                                                // one-way: never reset
+    move(pos.entryPrice + sign * be.bufferPips * pos.pip);
+  }
+  const st = pos.step;
+  if (st?.enabled) {
+    const L = Math.max(0, Math.floor(maxProfitPips / st.stepPips + EPS) * st.stepPips - st.lockOffsetPips);
+    if (L > 0) { lockedPips = Math.max(lockedPips, L); move(pos.entryPrice + sign * L * pos.pip); }
+  }
+  return { hit: false, exitPx, extreme, trailSl: pos.trailSl, effectiveSl, maxProfitPips, breakevenReached, lockedPips };
+}
+
+/** Why a stop that was hit is called what it is. */
+export function stopReason(p) {
+  if (p.model !== "candle_step") return p.trailSl != null && p.effectiveSl !== p.initialSl ? "trailing_stop" : "initial_stop";
+  if (p.effectiveSl === p.initialSl) return "initial_stop";
+  return (p.lockedPips || 0) > 0 ? "trailing_stop" : "breakeven_stop";
+}
+
 export class ScalperEngine {
   /**
    * @param {object} settings  validated settings (see settings.js)
@@ -144,10 +181,10 @@ export class ScalperEngine {
     // ── manage an open position BEFORE looking at the candle ──
     if (s.position && !s.pending && (s.status === STATUS.POSITION_ACTIVE || s.status === STATUS.TRAILING_STOP_MONITORING)) {
       s.status = STATUS.TRAILING_STOP_MONITORING;   // monitoring is immediate
-      const r = manageStop(s.position, tick);
+      const r = s.position.model === "candle_step" ? manageStepStop(s.position, tick) : manageStop(s.position, tick);
       if (r.hit) {
         const p = s.position;
-        const reason = p.trailSl != null && p.effectiveSl !== p.initialSl ? "trailing_stop" : "initial_stop";
+        const reason = stopReason(p);
         s.status = STATUS.POSITION_CLOSING;
         s.pending = { type: "CLOSE", reason, since: tick.epoch };
         cmds.push({ type: "CLOSE", reason, contractId: p.contractId, tradeId: p.id, refPrice: r.exitPx, stop: p.effectiveSl });
@@ -158,7 +195,8 @@ export class ScalperEngine {
           this.log("debug", `Stop moved ${p.effectiveSl} -> ${r.effectiveSl}`, { tradeId: p.id, extreme: r.extreme });
         }
         p.extreme = r.extreme; p.trailSl = r.trailSl; p.effectiveSl = r.effectiveSl;
-        if (p.trailSl != null && p.effectiveSl !== p.initialSl) p.trailActive = true;
+        if (p.model === "candle_step") { p.maxProfitPips = r.maxProfitPips; p.breakevenReached = r.breakevenReached; p.lockedPips = r.lockedPips; p.trailActive = p.effectiveSl !== p.initialSl; }
+        else if (p.trailSl != null && p.effectiveSl !== p.initialSl) p.trailActive = true;
       }
     } else if (s.position && s.pending?.type === "CLOSE" && tick.epoch >= s.retryCloseAfter && s.retryCloseAfter > 0) {
       // a rejected close is retried (the stop is still breached) — see onCloseRejected
@@ -213,8 +251,24 @@ export class ScalperEngine {
     }
 
     const side = dir === "BULLISH" ? "BUY" : "SELL";
-    const { slDist, trailDist, pip } = distancesFor(this.settings);
+    const st = this.settings;
+    const { slDist: legacySl, trailDist, pip } = distancesFor(st);
     const refPrice = side === "BUY" ? tick.ask : tick.bid;
+    let slDist = legacySl, initialSlPrice = null;
+    if (st.exitModel === "candle_step") {
+      const ref = side === "BUY" ? c.low : c.high;            // the SIGNAL candle's own extreme
+      const dist = side === "BUY" ? refPrice - ref : ref - refPrice;
+      if (dist > 0) { slDist = dist; initialSlPrice = ref; }
+      else if (st.candleSl.policy === "fallback") {
+        slDist = st.candleSl.fallbackPips * pip;
+        this.log("warn", `Candle ${side === "BUY" ? "low" : "high"} ${ref} is not a valid stop vs ${refPrice} — using the ${st.candleSl.fallbackPips}-pip fallback`);
+      } else {
+        s.blocked.invalidCandleSl = (s.blocked.invalidCandleSl || 0) + 1;
+        s.lastEntryCandleEpoch = c.epoch;
+        this.log("warn", `Entry rejected: candle ${side === "BUY" ? "low" : "high"} ${ref} is not a valid stop vs ${refPrice}`);
+        return;
+      }
+    }
     let size;
     try {
       size = computeSize(this.settings, { symbol: this.settings.symbol, balance: s.balance, entryPrice: refPrice, slDist });
@@ -228,7 +282,7 @@ export class ScalperEngine {
     s.pending = {
       type: "OPEN", side, signalCandleEpoch: c.epoch, since: tick.epoch,
       candleDirection: dir, refMid: (tick.bid + tick.ask) / 2, spread: tick.ask - tick.bid,
-      snapshot: { slDist, trailDist, pip, slPips: this.settings.slPips, trailPips: this.settings.trailPips, trailActivation: this.settings.trailActivation },
+      snapshot: this._snapshot(slDist, trailDist, pip, initialSlPrice),
     };
     s.status = STATUS.OPENING_POSITION;
     this.log("info", `Signal: candle ${c.epoch} ${dir} (O ${c.open} C ${c.close}) -> ${side}`, { candle: c });
@@ -237,8 +291,25 @@ export class ScalperEngine {
       candleDirection: dir, refPrice, refMid: (tick.bid + tick.ask) / 2,
       spread: tick.ask - tick.bid,
       stake: size.stake, multiplier: size.multiplier, nativeStopUsd: size.nativeStopUsd, sizeNotes: size.notes,
-      snapshot: { slDist, trailDist, pip, slPips: this.settings.slPips, trailPips: this.settings.trailPips, trailActivation: this.settings.trailActivation },
+      initialSlPrice, snapshot: this.s.pending.snapshot,
     });
+  }
+
+  /** Settings frozen at signal time so later dashboard edits only affect the NEXT position. */
+  _snapshot(slDist, trailDist, pip, initialSlPrice) {
+    const st = this.settings;
+    return {
+      model: st.exitModel, slDist, trailDist, pip, initialSlPrice,
+      slPips: slDist / pip, trailPips: st.exitModel === "candle_step" ? st.stepTrail.stepPips : st.trailPips,
+      trailActivation: st.trailActivation,
+      be: { ...st.breakeven }, step: { ...st.stepTrail },
+    };
+  }
+
+  _modelFields(snap) {
+    return snap.model === "candle_step"
+      ? { model: "candle_step", be: snap.be, step: snap.step, breakevenReached: false, maxProfitPips: 0, lockedPips: 0 }
+      : { model: "legacy" };
   }
 
   _riskBlock(tick) {
@@ -258,9 +329,10 @@ export class ScalperEngine {
     const s = this.s, pend = s.pending;
     if (!pend || pend.type !== "OPEN") { this.log("warn", "onOpenConfirmed without a pending OPEN — ignored"); return null; }
     const snap = pend.snapshot;
-    const { slDist } = snap;
     const buy = pend.side === "BUY";
-    const initialSl = buy ? entryPrice - slDist : entryPrice + slDist;       // fresh stop for THIS trade
+    const initialSl = snap.initialSlPrice ?? (buy ? entryPrice - snap.slDist : entryPrice + snap.slDist);   // candle extreme, or fixed distance from the ACTUAL fill
+    const slDist = Math.abs(entryPrice - initialSl);
+    if (snap.initialSlPrice != null && (buy ? initialSl >= entryPrice : initialSl <= entryPrice)) this.log("warn", `Fill ${entryPrice} gapped through the candle stop ${initialSl} — it will be hit immediately`);
     const lt = s.lastTick;
     const startExtreme = lt ? (buy ? Math.min(entryPrice, lt.bid) : Math.max(entryPrice, lt.ask)) : entryPrice;
     s.position = {
@@ -268,8 +340,9 @@ export class ScalperEngine {
       entryPrice, entryEpoch, entryCandleEpoch: bucketOf(entryEpoch), signalCandleEpoch: pend.signalCandleEpoch,
       candleDirection: pend.candleDirection, refEntryMid: pend.refMid, spreadAtEntry: pend.spread,
       stake, multiplier, nativeStopUsd,
-      slDist, trailDist: snap.trailDist, slPips: snap.slPips, trailPips: snap.trailPips, trailActivation: snap.trailActivation, pip: snap.pip,
+      slDist, trailDist: snap.trailDist, slPips: slDist / snap.pip, trailPips: snap.trailPips, trailActivation: snap.trailActivation, pip: snap.pip,
       initialSl, trailSl: null, effectiveSl: initialSl, extreme: startExtreme, trailActive: false,
+      ...this._modelFields(snap),
     };
     s.pending = null;
     s.execFailures = 0;
@@ -315,6 +388,7 @@ export class ScalperEngine {
       exitReason: reason, grossPnl, tradingCosts: grossPnl - execPnl + commission, commission, netPnl,
       durationSecs: exitEpoch - p.entryEpoch, spreadAtEntry: p.spreadAtEntry,
       mfePoints: Math.max(0, (p.extreme - p.entryPrice) * dirSign(p.side)),
+      model: p.model, breakevenReached: p.breakevenReached ?? null, maxProfitPips: p.maxProfitPips ?? null, lockedProfitPips: p.lockedPips ?? null,
     };
     s.position = null; s.pending = null; s.retryCloseAfter = 0;
     s.dailyPnl += netPnl; s.totalPnl += netPnl; s.totalTrades++; s.tradesToday++;
@@ -375,17 +449,21 @@ export class ScalperEngine {
 
   _adopt(bp) {
     const s = this.s;
-    const { slDist, trailDist, pip } = distancesFor(this.settings);
+    const st = this.settings;
+    const { slDist: legacySl, trailDist, pip } = distancesFor(st);
+    const slDist = st.exitModel === "candle_step" ? st.candleSl.fallbackPips * pip : legacySl;   // the signal candle is unknown for an adopted trade
     const buy = bp.side === "BUY";
     const initialSl = buy ? bp.entryPrice - slDist : bp.entryPrice + slDist;
+    const snap = this._snapshot(slDist, trailDist, pip, initialSl);
     s.position = {
       id: s.nextTradeId++, side: bp.side, symbol: this.settings.symbol, contractId: bp.contractId, orderId: null,
       entryPrice: bp.entryPrice, entryEpoch: bp.entryEpoch, entryCandleEpoch: bucketOf(bp.entryEpoch),
       signalCandleEpoch: null, candleDirection: null, refEntryMid: bp.entryPrice, spreadAtEntry: null,
       stake: bp.stake, multiplier: bp.multiplier, nativeStopUsd: null,
-      slDist, trailDist, slPips: this.settings.slPips, trailPips: this.settings.trailPips,
+      slDist, trailDist, slPips: snap.slPips, trailPips: snap.trailPips,
       trailActivation: this.settings.trailActivation, pip,
       initialSl, trailSl: null, effectiveSl: initialSl, extreme: bp.entryPrice, trailActive: false, adopted: true,
+      ...this._modelFields(snap),
     };
     s.pending = null;
     s.status = STATUS.POSITION_ACTIVE;

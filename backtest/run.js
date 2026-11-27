@@ -24,6 +24,7 @@ try { saved = JSON.parse(fs.readFileSync(path.resolve(process.env.DATA_DIR || "d
 const symbol = symbolArg || saved.symbol || "R_100";
 const patch = { symbol, enabled: true };
 if (opt.sl) patch.slPips = Number(opt.sl);
+if (opt.model) patch.exitModel = opt.model;               // candle_step | legacy
 if (opt.trail) patch.trailPips = Number(opt.trail);
 if (opt.activation) patch.trailActivation = opt.activation;
 if (opt.pip) patch.pipSizes = { [symbol]: Number(opt.pip) };
@@ -68,7 +69,8 @@ const days = (data[data.length - 1].epoch - data[0].epoch) / 86400;
 console.log(`\nSymbol ${symbol} | ${mode} data (${source(raw)}) | ${n.toLocaleString()} rows ≈ ${days.toFixed(1)} days`);
 const refPrice = (ticks ? ticks[0].quote : bars[0].close);
 const pv = riskPreview(settings, { symbol, refPrice, balance: startBalance });
-console.log(`Stops: SL ${settings.slPips} pips, trail ${settings.trailPips} pips (${settings.trailActivation}), 1 pip = ${pv.pipSize} → SL ${fmt(pv.slPoints, 4)} pts (${fmt(pv.slPctOfPrice, 3)}% of price) | stake $${pv.stake} ×${pv.multiplier} | costs: spread ${settings.costs.spreadPoints}, slippage ${settings.costs.slippagePoints}, commission $${settings.costs.commissionUsd}`);
+if (settings.exitModel === "candle_step") console.log(`Exit model: signal-candle SL, breakeven ${settings.breakeven.enabled ? "+" + settings.breakeven.triggerPips : "off"}, step trail ${settings.stepTrail.enabled ? settings.stepTrail.stepPips + "/" + settings.stepTrail.lockOffsetPips : "off"} pips, 1 pip = ${pv.pipSize}`);
+else console.log(`Stops: SL ${settings.slPips} pips, trail ${settings.trailPips} pips (${settings.trailActivation}), 1 pip = ${pv.pipSize} → SL ${fmt(pv.slPoints, 4)} pts (${fmt(pv.slPctOfPrice, 3)}% of price) | stake $${pv.stake} ×${pv.multiplier} | costs: spread ${settings.costs.spreadPoints}, slippage ${settings.costs.slippagePoints}, commission $${settings.costs.commissionUsd}`);
 if (mode === "candle") console.log("NOTE: OHLC-only data — the order of events inside each minute is unknown. Bars where it changes the result are flagged ambiguous and the WORSE outcome is used.");
 if (raw.source === "synthetic") console.log("NOTE: synthetic random-walk data. It has no edge by construction — this only proves the machinery runs.");
 

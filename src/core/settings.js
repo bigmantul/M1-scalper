@@ -10,8 +10,20 @@ export const DEFAULT_SETTINGS = {
   mode: "demo",                // "demo" | "real" (real also needs ALLOW_REAL=true in .env)
   enabled: false,              // master switch / emergency disable
 
-  slPips: 20,                  // initial stop-loss distance
-  trailPips: 15,               // fixed trailing distance
+  // Exit model:
+  //   "candle_step" – initial SL = low/high of the signal candle, breakeven at +N pips, then a stepped
+  //                   profit-lock trail (see breakeven / stepTrail below).  No take profit.
+  //   "legacy"      – fixed slPips initial stop + fixed trailPips trailing distance (the original model).
+  exitModel: "candle_step",
+  candleSl: {
+    policy: "reject",          // when the candle's low/high is not a valid stop: "reject" the entry, or "fallback" to fallbackPips
+    fallbackPips: 20,
+  },
+  breakeven: { enabled: true, triggerPips: 5, bufferPips: 0 },
+  stepTrail: { enabled: true, stepPips: 5, lockOffsetPips: 5 },   // independent of breakeven
+
+  slPips: 20,                  // legacy model: initial stop-loss distance
+  trailPips: 15,               // legacy model: fixed trailing distance
   // "breakeven": trail only takes over once (extreme -/+ trailPips) has reached
   //              the entry price, so the full initial risk (slPips) is kept
   //              until then.   "immediate": effective SL = max(initial, trail) from the first tick.
@@ -65,6 +77,15 @@ export function validateSettings(candidate) {
   if (!SYMBOLS.includes(s.symbol)) throw new Error(`Unknown symbol "${s.symbol}"`);
   if (!["demo", "real"].includes(s.mode)) throw new Error(`mode must be "demo" or "real"`);
   bool(s.enabled, "enabled");
+  if (!["candle_step", "legacy"].includes(s.exitModel)) throw new Error(`exitModel must be "candle_step" or "legacy"`);
+  if (!["reject", "fallback"].includes(s.candleSl.policy)) throw new Error(`candleSl.policy must be "reject" or "fallback"`);
+  num(s.candleSl.fallbackPips, "candleSl.fallbackPips", { gt: 0, max: 100000 });
+  bool(s.breakeven.enabled, "breakeven.enabled");
+  num(s.breakeven.triggerPips, "breakeven.triggerPips", { gt: 0, max: 100000 });
+  num(s.breakeven.bufferPips, "breakeven.bufferPips", { min: 0, max: 100000 });
+  bool(s.stepTrail.enabled, "stepTrail.enabled");
+  num(s.stepTrail.stepPips, "stepTrail.stepPips", { gt: 0, max: 100000 });
+  num(s.stepTrail.lockOffsetPips, "stepTrail.lockOffsetPips", { min: 0, max: 100000 });
   num(s.slPips, "slPips", { gt: 0, max: 100000 });
   num(s.trailPips, "trailPips", { gt: 0, max: 100000 });
   if (!["breakeven", "immediate"].includes(s.trailActivation)) throw new Error(`trailActivation must be "breakeven" or "immediate"`);

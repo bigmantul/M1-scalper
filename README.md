@@ -67,3 +67,14 @@ test/                 engine rules, simulator, live flow vs fake Deriv
 - **Stop sanity check** (Risk section of the dashboard): if the stop is smaller than *N ×* a typical tick move on the chosen symbol, the bot skips the entry (counted as `stopTooTight`) instead of opening a trade that random jitter will stop out. The preview shows your stop as a multiple of a typical tick once ticks are flowing.
 - **Multiplier**: on connect the bot asks Deriv which multipliers the symbol offers. `auto` uses the smallest. A multiplier you type that Deriv doesn't offer is rejected with the allowed list, never silently changed.
 - **Rejected orders** are logged with the exact request sent to Deriv.
+
+## Exit model: signal-candle stop, breakeven, step trail (default)
+
+Entries are unchanged: the previous *completed* M1 candle's direction, opened at the next candle's first tick (doji = no trade, one entry per candle, one position).
+
+- **Initial stop** = the signal candle's **low** (BUY) or **high** (SELL). If that level is not a valid stop against the real price (a gap), the entry is skipped, or a fallback distance is used if you set `candleSl.policy = fallback`.
+- **Breakeven**: once the best price reaches `breakeven.triggerPips` (default 5), the stop moves to entry (+ `bufferPips`). One-way.
+- **Step trail**: locked pips = `max(0, floor(maxProfit / step) × step − offset)` (defaults 5 / 5), based on the best price reached, so retracements never loosen it and a jump over several milestones goes straight to the highest stop. Breakeven and the step trail are independent switches.
+- **No take profit.** Exit reasons: `initial_stop`, `breakeven_stop`, `trailing_stop`.
+- Only the initial stop is placed at Deriv (as a loss amount, $0.10 minimum). Deriv cannot move a multiplier stop into profit, so breakeven and trailing are enforced by the bot while it is running.
+- The original fixed-pip model is still available: set **Exit model** to "Fixed SL + fixed trail" on the dashboard.

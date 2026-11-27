@@ -23,7 +23,7 @@ async function setup({ settings = {}, savedState = null, contracts = [] } = {}) 
   process.env.DERIV_REST_BASE = fake.url();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scalper-"));
   const store = new Store(dir);
-  store.saveSettings(validateSettings({ symbol: "R_100", pipSizes: { R_100: 1 }, sizing: { mode: "fixed", stake: 10 }, enabled: false, ...settings }));
+  store.saveSettings(validateSettings({ exitModel: "legacy", symbol: "R_100", pipSizes: { R_100: 1 }, sizing: { mode: "fixed", stake: 10 }, enabled: false, ...settings }));
   if (savedState) store.saveState(savedState);
   for (const c of contracts) fake.addContract(c);
   const bot = new Bot({ store, env: { DERIV_PAT_TOKEN: "pat_test", DERIV_APP_ID: "app", ...(settings._env || {}) } });
@@ -348,5 +348,24 @@ test("a server-side stop under Deriv's $0.10 minimum is not sent (even if old se
     await bullishSignal(fake);
     await until(() => fake.proposals.length >= 1);
     assert.equal(fake.proposals[0].limit_order, undefined, "~$0.05 stop is below $0.10: only the bot's own stop");
+  } finally { await teardown(); }
+});
+
+test("live cycle with the candle-SL / breakeven / step-trail model", async () => {
+  const { fake, bot, store, teardown } = await setup({ settings: { exitModel: "candle_step", multiplier: 10 } });
+  try {
+    bot.start(); await until(() => bot.connected);
+    await bullishSignal(fake);                              // candle low 100, fill 101
+    await until(() => bot.engine.position);
+    const p = bot.engine.position;
+    assert.equal(p.initialSl, 100, "signal candle's low");
+    assert.equal(fake.proposals[0].limit_order.stop_loss, 0.99, "server-side stop = 10 × 10 × (1/101)");
+
+    fake.pushTick(K(1) + 10, 111);                           // +10 pips → SL entry + 5 = 106
+    await until(() => bot.engine.position?.effectiveSl === 106, 2000, "locked +5");
+    fake.pushTick(K(1) + 20, 105);                           // hits 106 → client-side sell
+    await until(() => store.trades.length === 1, 4000, "trade recorded");
+    assert.equal(store.trades[0].exitReason, "trailing_stop");
+    assert.equal(fake.sells.length, 1);
   } finally { await teardown(); }
 });
