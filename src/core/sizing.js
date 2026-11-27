@@ -70,7 +70,7 @@ export function riskPreview(settings, { symbol, refPrice, balance = 0 }) {
   const slDist = (candle ? settings.candleSl.fallbackPips : settings.slPips) * pip, trailDist = (candle ? settings.stepTrail.stepPips : settings.trailPips) * pip;
   const out = {
     symbol, pipSize: pip, slPoints: slDist, trailPoints: trailDist, candleStop: candle,
-    ...(candle ? { breakevenPoints: settings.breakeven.triggerPips * pip, stepPoints: settings.stepTrail.stepPips * pip } : {}),
+    ...(candle ? { breakevenPoints: settings.breakeven.triggerPips * pip, stepPoints: settings.stepTrail.stepPips * pip, breakevenOn: settings.breakeven.enabled, breakevenPips: settings.breakeven.triggerPips, activationPips: settings.stepTrail.enabled ? settings.stepTrail.activationPips : 0 } : {}),
     slPctOfPrice: refPrice ? (slDist / refPrice) * 100 : null,
     trailPctOfPrice: refPrice ? (trailDist / refPrice) * 100 : null,
     multiplier: pickMultiplier(settings, symbol),

@@ -143,6 +143,7 @@
               <div><label class="chk"><input type="checkbox" id="stpOn">Step trailing stop</label></div>
               <div><label for="stpStep">Trail step (pips)</label><input id="stpStep" type="number" step="any" min="0"></div>
               <div><label for="stpOff">Lock offset (pips)</label><input id="stpOff" type="number" step="any" min="0"></div>
+              <div><label for="stpAct">Start trailing after profit of (pips)</label><input id="stpAct" type="number" step="any" min="0"></div>
             </div>
             <div class="row">
               <div><label for="cslPol">If the candle's extreme is not a valid stop</label>
@@ -343,7 +344,7 @@ const symInfo = (sym) => symbols.find(s => s.symbol === sym);
 function fillForm() {
   const s = settings, f = (id, v) => { $(id).value = v; };
   f("exitModel", s.exitModel); $("beOn").checked = s.breakeven.enabled; f("beTrig", s.breakeven.triggerPips); f("beBuf", s.breakeven.bufferPips);
-  $("stpOn").checked = s.stepTrail.enabled; f("stpStep", s.stepTrail.stepPips); f("stpOff", s.stepTrail.lockOffsetPips);
+  $("stpOn").checked = s.stepTrail.enabled; f("stpStep", s.stepTrail.stepPips); f("stpOff", s.stepTrail.lockOffsetPips); f("stpAct", s.stepTrail.activationPips ?? 0);
   f("cslPol", s.candleSl.policy); f("cslFb", s.candleSl.fallbackPips); showModel();
   f("symbol", s.symbol); f("mode", s.mode); f("slPips", s.slPips); f("trailPips", s.trailPips); f("trailActivation", s.trailActivation);
   f("pip", symInfo(s.symbol)?.pip ?? ""); f("sizeMode", s.sizing.mode); f("stake", s.sizing.stake); f("riskPct", s.sizing.riskPct); f("maxStake", s.sizing.maxStake);
@@ -373,7 +374,7 @@ function readForm() {
   return {
     exitModel: $("exitModel").value,
     breakeven: { enabled: $("beOn").checked, triggerPips: n("beTrig"), bufferPips: n("beBuf") },
-    stepTrail: { enabled: $("stpOn").checked, stepPips: n("stpStep"), lockOffsetPips: n("stpOff") },
+    stepTrail: { enabled: $("stpOn").checked, stepPips: n("stpStep"), lockOffsetPips: n("stpOff"), activationPips: n("stpAct") },
     candleSl: { policy: $("cslPol").value, fallbackPips: n("cslFb") },
     symbol: sym, mode: $("mode").value, slPips: n("slPips"), trailPips: n("trailPips"), trailActivation: $("trailActivation").value,
     pipSizes: { [sym]: n("pip") }, multiplier: (m === "" || m === "auto") ? "auto" : Number(m),
@@ -396,6 +397,7 @@ function schedulePreview() {
       else parts.push(`stop <b>${px(p.slPoints)}</b> pts${p.slPctOfPrice != null ? ` (${p.slPctOfPrice.toFixed(3)}% of price)` : ""}`,
         `trail <b>${px(p.trailPoints)}</b> pts${p.trailPctOfPrice != null ? ` (${p.trailPctOfPrice.toFixed(3)}%)` : ""}`);
       let tail = "";
+      if (p.candleStop && p.activationPips > 0 && p.breakevenOn && p.breakevenPips < p.activationPips) tail += `<br><span class="neg">Breakeven (+${p.breakevenPips}) acts before trailing starts (+${p.activationPips}). To keep ONLY the initial stop below +${p.activationPips}, turn breakeven off or set its trigger to ${p.activationPips} or more.</span>`;
       if (p.stopInTicks != null) {
         const k = p.stopInTicks, bad = k < p.minStopTicks, weak = k < 3;
         tail += `<br>Stop = <b>${k.toFixed(1)}×</b> a typical tick move (${px(p.typicalTick)})` + (bad ? `. <span class="neg">Too small — the bot will skip entries until you widen it.</span>` : weak ? `. <span class="neg">Small — random jitter may hit it.</span>` : ` ✓`);

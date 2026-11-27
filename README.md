@@ -78,3 +78,22 @@ Entries are unchanged: the previous *completed* M1 candle's direction, opened at
 - **No take profit.** Exit reasons: `initial_stop`, `breakeven_stop`, `trailing_stop`.
 - Only the initial stop is placed at Deriv (as a loss amount, $0.10 minimum). Deriv cannot move a multiplier stop into profit, so breakeven and trailing are enforced by the bot while it is running.
 - The original fixed-pip model is still available: set **Exit model** to "Fixed SL + fixed trail" on the dashboard.
+
+### Dashboard settings for the candle model, one by one
+
+| Setting | What it does |
+|---|---|
+| **Exit model** | Candle SL + breakeven + step trail (default), or the original fixed SL + fixed trail. |
+| **Breakeven** (on/off) | When on, the stop moves to your entry price once the trade has been in profit by the trigger. |
+| **Breakeven trigger (pips)** | Profit needed before the stop moves to entry. Default 5. |
+| **Breakeven buffer (pips)** | Extra pips beyond entry when breakeven fires (covers spread). 0 = exactly entry. |
+| **Step trailing stop** (on/off) | When on, the stop climbs in fixed steps as profit grows. Independent of breakeven. |
+| **Trail step (pips)** | Size of each profit milestone. Default 5. |
+| **Lock offset (pips)** | How far behind the milestone the stop sits. Locked pips = (milestone reached) − offset. Default 5, so +10 locks +5, +20 locks +15. |
+| **Start trailing after profit of (pips)** | The trail stays completely off until the trade's best profit has reached this many pips; below it the exit is only the initial stop (plus breakeven, if you left it on). 0 = no extra gate. |
+| **If the candle's extreme is not a valid stop** | *Skip the entry* (default) or *use a fallback distance*. |
+| **Fallback distance (pips)** | The stop distance used if you chose the fallback. Also used to size the preview, and for a trade adopted after a restart. |
+| **Pip size** | How many price points one pip is for the chosen symbol. Everything above is multiplied by it. |
+| **Min stop size (× a typical tick move)** | Skips an entry whose stop is smaller than this many typical tick moves (the candle's low/high can be very close to your entry). |
+
+Example: breakeven off, trailing on, start after 12 pips, step 5, offset 5. The stop stays at the candle extreme until the trade reaches +12, then locks +5; at +15 it locks +10, and so on. If the trade never reaches +12, it can only exit on the initial stop.

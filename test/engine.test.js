@@ -493,3 +493,20 @@ test("candle model: a fixed-pip distance is never used for the initial stop", ()
   const h = cs({ slPips: 50 }); bullOpen(h);
   assert.equal(h.engine.position.initialSl, 95);
 });
+
+test("trail activation: below the activation profit only the initial stop applies; then the ladder starts", () => {
+  const h = cs({ breakeven: { enabled: false }, stepTrail: { activationPips: 12 } }); bullOpen(h);   // entry 101, SL 95
+  h.step(K(1) + 5, 111);                                  // +10: ladder would lock +5, but not activated yet
+  assert.equal(h.engine.position.effectiveSl, 95);
+  h.step(K(1) + 6, 114);                                  // +13 ≥ 12 → floor(13/5)*5-5 = 5 locked
+  assert.equal(h.engine.position.effectiveSl, 106);
+  h.step(K(1) + 7, 108);                                  // pullback: stays
+  assert.equal(h.engine.position.effectiveSl, 106);
+});
+
+test("trail activation: a trade that never reaches it exits only on the initial stop", () => {
+  const h = cs({ breakeven: { enabled: false }, stepTrail: { activationPips: 12 } }); bullOpen(h);
+  h.step(K(1) + 5, 111); h.step(K(1) + 6, 96); assert.equal(h.closes.length, 0);
+  h.step(K(1) + 7, 94);
+  assert.equal(h.trades[0].exitReason, "initial_stop");
+});

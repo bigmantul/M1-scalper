@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS = {
     fallbackPips: 20,
   },
   breakeven: { enabled: true, triggerPips: 5, bufferPips: 0 },
-  stepTrail: { enabled: true, stepPips: 5, lockOffsetPips: 5 },   // independent of breakeven
+  stepTrail: { enabled: true, stepPips: 5, lockOffsetPips: 5, activationPips: 0 },   // activationPips: trail stays off until the trade has been this many pips in profit (0 = no extra gate)   // independent of breakeven
 
   slPips: 20,                  // legacy model: initial stop-loss distance
   trailPips: 15,               // legacy model: fixed trailing distance
@@ -85,6 +85,7 @@ export function validateSettings(candidate) {
   num(s.breakeven.bufferPips, "breakeven.bufferPips", { min: 0, max: 100000 });
   bool(s.stepTrail.enabled, "stepTrail.enabled");
   num(s.stepTrail.stepPips, "stepTrail.stepPips", { gt: 0, max: 100000 });
+  num(s.stepTrail.activationPips, "stepTrail.activationPips", { min: 0, max: 100000 });
   num(s.stepTrail.lockOffsetPips, "stepTrail.lockOffsetPips", { min: 0, max: 100000 });
   num(s.slPips, "slPips", { gt: 0, max: 100000 });
   num(s.trailPips, "trailPips", { gt: 0, max: 100000 });

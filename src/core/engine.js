@@ -90,7 +90,7 @@ export function manageStepStop(pos, tick) {
     move(pos.entryPrice + sign * be.bufferPips * pos.pip);
   }
   const st = pos.step;
-  if (st?.enabled) {
+  if (st?.enabled && maxProfitPips + EPS >= (st.activationPips || 0)) {     // below the activation profit only the initial stop (and breakeven, if on) applies
     const L = Math.max(0, Math.floor(maxProfitPips / st.stepPips + EPS) * st.stepPips - st.lockOffsetPips);
     if (L > 0) { lockedPips = Math.max(lockedPips, L); move(pos.entryPrice + sign * L * pos.pip); }
   }
